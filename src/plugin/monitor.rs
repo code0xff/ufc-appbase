@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 
 use appbase::*;
 use jsonrpc_core::{Params, Value};
@@ -7,11 +6,11 @@ use serde_json;
 use serde_json::Map;
 
 use crate::plugin::jsonrpc::JsonRpcPlugin;
+use crate::validation::subscribe;
 
 pub struct MonitorPlugin {
     base: PluginBase,
-    tendermint: Option<ChannelHandle>,
-    // channels: Option<Arc<Mutex<HashMap<String, ChannelHandle>>>>,
+    channels: Option<HashMap<String, ChannelHandle>>,
 }
 
 appbase_plugin_requires!(MonitorPlugin; JsonRpcPlugin);
@@ -22,8 +21,7 @@ impl Plugin for MonitorPlugin {
     fn new() -> Self {
         MonitorPlugin {
             base: PluginBase::new(),
-            tendermint: None,
-            // channels: None,
+            channels: None,
         }
     }
 
@@ -33,12 +31,11 @@ impl Plugin for MonitorPlugin {
         }
 
         unsafe {
-            self.tendermint = Some(APP.get_channel("tendermint".to_string()));
-            // let mut channels: HashMap<String, ChannelHandle> = HashMap::new();
-            // channels.insert("tendermint".to_string(), APP.get_channel("tendermint".to_string()));
-            // self.channels = Some(Arc::new(Mutex::new(channels.to_owned())));
+            let mut channels: HashMap<String, ChannelHandle> = HashMap::new();
+            channels.insert("tendermint".to_string(), APP.get_channel("tendermint".to_string()));
+            self.channels = Some(channels.to_owned());
         }
-        let tendermint = Arc::clone(&self.tendermint.as_ref().unwrap());
+        let channels = self.channels.as_ref().unwrap().clone();
 
         let mut _p1: PluginHandle;
         unsafe {
@@ -46,17 +43,33 @@ impl Plugin for MonitorPlugin {
         }
         let mut plugin = _p1.lock().unwrap();
         let jsonrpc = plugin.downcast_mut::<JsonRpcPlugin>().unwrap();
-        jsonrpc.add_sync_method("subscribe_block".to_string(), move |params: Params| {
-            let _params: Map<String, Value> = params.parse().unwrap();
-            let chain = _params.get("chain").unwrap().as_str().unwrap();
+        jsonrpc.add_sync_method("subscribe".to_string(), move |params: Params| {
+            let params: Map<String, Value> = params.parse().unwrap();
+            let verified = subscribe::verify(&params);
+            if verified.is_err() {
+                return Ok(Value::String(verified.unwrap_err()));
+            }
 
-            tendermint
-                .lock()
-                .unwrap()
-                .send(Value::String("start!".to_string()))
-                .unwrap();
+            let chain = params.get("chain").unwrap().as_str().unwrap();
+            let result = match channels.get(chain) {
+                None => {
+                    Err(String::from("not registered chain"))
+                }
+                Some(channel) => {
+                    channel
+                        .lock()
+                        .unwrap()
+                        .send(Value::Object(params))
+                        .unwrap();
+                    Ok(String::from("subscribe started"))
+                }
+            };
 
-            Ok(Value::String("subscribe started".to_string()))
+            let message = match result {
+                Ok(message) => message,
+                Err(err_message) => err_message,
+            };
+            Ok(Value::String(message))
         });
     }
 

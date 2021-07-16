@@ -3,6 +3,8 @@ use appbase::APP;
 use crate::plugin::tendermint::TendermintPlugin;
 
 mod plugin;
+mod types;
+mod validation;
 
 #[tokio::main]
 async fn main() {
