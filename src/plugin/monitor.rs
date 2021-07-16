@@ -32,7 +32,7 @@ impl Plugin for MonitorPlugin {
 
         unsafe {
             let mut channels: HashMap<String, ChannelHandle> = HashMap::new();
-            channels.insert("tendermint".to_string(), APP.get_channel("tendermint".to_string()));
+            channels.insert(String::from("tendermint"), APP.get_channel(String::from("tendermint")));
             self.channels = Some(channels.to_owned());
         }
         let channels = self.channels.as_ref().unwrap().clone();
@@ -43,7 +43,7 @@ impl Plugin for MonitorPlugin {
         }
         let mut plugin = _p1.lock().unwrap();
         let jsonrpc = plugin.downcast_mut::<JsonRpcPlugin>().unwrap();
-        jsonrpc.add_sync_method("subscribe".to_string(), move |params: Params| {
+        jsonrpc.add_sync_method(String::from("subscribe"), move |params: Params| {
             let params: Map<String, Value> = params.parse().unwrap();
             let verified = subscribe::verify(&params);
             if verified.is_err() {

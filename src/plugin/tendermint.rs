@@ -1,24 +1,25 @@
 use std::convert::TryFrom;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use appbase::*;
+use futures::lock::Mutex as FutureMutex;
 use serde_json::{Map, Value};
 
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::plugin::monitor::MonitorPlugin;
+use crate::plugin::rocks::RocksPlugin;
 use crate::types::block::SubscribeBlock;
-use jsonrpc_http_server::tokio::time::Duration;
-use std::thread;
 
 pub struct TendermintPlugin {
     base: PluginBase,
     subscribe_blocks: Option<SubscribeBlocks>,
+    channel: Option<ChannelHandle>,
     monitor: Option<SubscribeHandle>,
 }
 
-type SubscribeBlocks = Arc<Mutex<Vec<SubscribeBlock>>>;
+type SubscribeBlocks = Arc<FutureMutex<Vec<SubscribeBlock>>>;
 
-appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, MonitorPlugin);
+appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, MonitorPlugin, RocksPlugin);
 
 impl Plugin for TendermintPlugin {
     appbase_plugin_default!(TendermintPlugin);
@@ -27,6 +28,7 @@ impl Plugin for TendermintPlugin {
         TendermintPlugin {
             base: PluginBase::new(),
             subscribe_blocks: None,
+            channel: None,
             monitor: None,
         }
     }
@@ -36,8 +38,9 @@ impl Plugin for TendermintPlugin {
             return;
         }
         unsafe {
-            self.subscribe_blocks = Some(Arc::new(Mutex::new(Vec::new())));
-            self.monitor = Some(APP.subscribe_channel("tendermint".to_string()));
+            self.subscribe_blocks = Some(Arc::new(FutureMutex::new(Vec::new())));
+            self.channel = Some(APP.get_channel(String::from("rocks")));
+            self.monitor = Some(APP.subscribe_channel(String::from("tendermint")));
         }
     }
 
@@ -47,40 +50,36 @@ impl Plugin for TendermintPlugin {
         }
 
         let monitor = Arc::clone(self.monitor.as_ref().unwrap());
+        let channel = Arc::clone(self.channel.as_ref().unwrap());
         let subscribe_blocks = Arc::clone(self.subscribe_blocks.as_ref().unwrap());
         tokio::spawn(async move {
             let mut _monitor = monitor.lock().await;
             loop {
-                let message = _monitor.recv().await.unwrap();
-                let block = message.as_object().unwrap();
-                let chain = block.get("chain").unwrap().to_string();
-                let chain_id = block.get("chain_id").unwrap().to_string();
-                let start_height = block.get("start_height").unwrap().as_u64().unwrap();
-                let _nodes = block.get("nodes").unwrap().as_array().unwrap();
-                let mut nodes: Vec<String> = Vec::new();
-                for n in _nodes.iter() {
-                    nodes.push(String::from(n.as_str().unwrap()));
+                if let Ok(message) = _monitor.try_recv() {
+                    let block = message.as_object().unwrap();
+                    let _nodes = block.get("nodes").unwrap().as_array().unwrap();
+                    let start_height = block.get("start_height").unwrap().as_u64().unwrap();
+                    let mut nodes: Vec<String> = Vec::new();
+                    for n in _nodes.iter() {
+                        nodes.push(String::from(n.as_str().unwrap()));
+                    }
+                    let new_subscribe_block = SubscribeBlock {
+                        chain: String::from(block.get("chain").unwrap().as_str().unwrap()),
+                        chain_id: String::from(block.get("chain_id").unwrap().as_str().unwrap()),
+                        start_height,
+                        current_height: start_height,
+                        nodes,
+                        node_index: 0,
+                    };
+                    let mut _subscribe_blocks = subscribe_blocks.lock().await;
+                    _subscribe_blocks.push(new_subscribe_block);
                 }
-                let subscribe_block = SubscribeBlock {
-                    chain,
-                    chain_id,
-                    start_height,
-                    current_height: start_height,
-                    nodes,
-                    node_index: 0,
-                };
-                subscribe_blocks.lock().unwrap().push(subscribe_block);
-            }
-        });
 
-        let subscribe_blocks = Arc::clone(self.subscribe_blocks.as_ref().unwrap());
-        tokio::spawn(async move {
-            loop {
-                let mut _subscribe_blocks = subscribe_blocks.lock().unwrap().clone();
-                for sb in _subscribe_blocks.iter_mut() {
-                    if sb.node_index >= 0 {
-                        let node_index = usize::try_from(sb.node_index).unwrap();
-                        let node_url = sb.nodes[node_index].as_str().to_owned() + sb.current_height.to_string().as_str();
+                let mut _subscribe_blocks = subscribe_blocks.lock().await;
+                for subscribe_block in _subscribe_blocks.iter_mut() {
+                    if subscribe_block.node_index >= 0 {
+                        let node_index = usize::try_from(subscribe_block.node_index).unwrap();
+                        let node_url = subscribe_block.nodes[node_index].as_str().to_owned() + subscribe_block.current_height.to_string().as_str();
 
                         let body = reqwest::get(node_url)
                             .await
@@ -88,16 +87,24 @@ impl Plugin for TendermintPlugin {
                             .text()
                             .await;
 
-                        let result: Map<String, Value> = serde_json::from_str(body.unwrap().as_str()).unwrap();
-                        if result.get("error").is_none() {
-                            sb.current_height += 1;
-                            println!("{:?}", result);
+                        let _body: Map<String, Value> = serde_json::from_str(body.unwrap().as_str()).unwrap();
+                        if _body.get("error").is_none() {
+                            let result = _body.get("result").unwrap().as_object().unwrap();
+                            let block = result.get("block").unwrap().as_object().unwrap();
+                            let block_header = block.get("header").unwrap();
+
+                            let mut block_data = Map::new();
+                            let key = format!("{}:{}:{}", subscribe_block.chain, subscribe_block.chain_id, subscribe_block.current_height);
+                            block_data.insert(String::from("key"), Value::String(key));
+                            block_data.insert(String::from("value"), Value::String(block_header.to_string()));
+
+                            let _ = channel.lock().unwrap().send(Value::from(block_data));
+                            subscribe_block.current_height += 1;
                         } else {
-                            println!("{:?}", result.get("error").unwrap());
+                            println!("{:?}", _body.get("error").unwrap());
                         }
                     }
                 }
-                thread::sleep(Duration::from_secs(1));
             }
         });
     }
