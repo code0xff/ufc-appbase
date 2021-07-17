@@ -19,7 +19,7 @@ pub struct TendermintPlugin {
 
 type SubscribeBlocks = Arc<FutureMutex<Vec<SubscribeBlock>>>;
 
-appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, MonitorPlugin, RocksPlugin);
+appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, MonitorPlugin, MongoPlugin);
 
 impl Plugin for TendermintPlugin {
     appbase_plugin_default!(TendermintPlugin);
@@ -39,7 +39,7 @@ impl Plugin for TendermintPlugin {
         }
         unsafe {
             self.subscribe_blocks = Some(Arc::new(FutureMutex::new(Vec::new())));
-            self.channel = Some(APP.get_channel(String::from("rocks")));
+            self.channel = Some(APP.get_channel(String::from("mongo")));
             self.monitor = Some(APP.subscribe_channel(String::from("tendermint")));
         }
     }
@@ -93,13 +93,19 @@ impl Plugin for TendermintPlugin {
                             let block = result.get("block").unwrap().as_object().unwrap();
                             let block_header = block.get("header").unwrap();
 
-                            let mut block_data = Map::new();
-                            let key = format!("{}:{}:{}", subscribe_block.chain, subscribe_block.chain_id, subscribe_block.current_height);
-                            block_data.insert(String::from("key"), Value::String(key));
-                            block_data.insert(String::from("value"), Value::String(block_header.to_string()));
-
-                            let _ = channel.lock().unwrap().send(Value::from(block_data));
                             subscribe_block.current_height += 1;
+
+                            let mut data = Map::new();
+                            data.insert(String::from("collection"), Value::String(String::from("block")));
+                            data.insert(String::from("document"), block_header.clone());
+
+                            channel.lock().unwrap().send(Value::Object(data));
+
+                            // let key = format!("{}:{}:{}", subscribe_block.chain, subscribe_block.chain_id, subscribe_block.current_height);
+                            // data.insert(String::from("key"), Value::String(key));
+                            // data.insert(String::from("value"), Value::String(block_header.to_string()));
+                            //
+                            // let _ = channel.lock().unwrap().send(Value::Object(data));
                         } else {
                             println!("{:?}", _body.get("error").unwrap());
                         }

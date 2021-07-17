@@ -6,11 +6,11 @@ use rocksdb::{DB, DBWithThreadMode, SingleThreaded};
 
 pub struct RocksPlugin {
     base: PluginBase,
-    db: Option<DBConnection>,
+    db: Option<RocksDB>,
     monitor: Option<SubscribeHandle>,
 }
 
-type DBConnection = Arc<FutureMutex<DBWithThreadMode<SingleThreaded>>>;
+type RocksDB = Arc<FutureMutex<DBWithThreadMode<SingleThreaded>>>;
 
 appbase_plugin_requires!(RocksPlugin; );
 
