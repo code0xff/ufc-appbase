@@ -8,6 +8,7 @@ use serde_json::{Map, Value};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::plugin::monitor::MonitorPlugin;
 use crate::plugin::rocks::RocksPlugin;
+use crate::plugin::mongo::MongoPlugin;
 use crate::types::block::SubscribeBlock;
 
 pub struct TendermintPlugin {
