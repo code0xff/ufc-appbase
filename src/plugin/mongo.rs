@@ -6,6 +6,7 @@ use mongodb::{Client, Database};
 use mongodb::bson;
 use mongodb::bson::*;
 use mongodb::options::ClientOptions;
+use futures::executor;
 
 pub struct MongoPlugin {
     base: PluginBase,
@@ -34,7 +35,7 @@ impl Plugin for MongoPlugin {
         }
 
         unsafe {
-            let mut client_options = ClientOptions::parse("mongodb://localhost:27017").await.unwrap();
+            let mut client_options = executor::block_on(async { ClientOptions::parse("mongodb://localhost:27017").await }).unwrap();
             client_options.app_name = Some(String::from("MongoDB"));
             let client = Client::with_options(client_options).unwrap();
             self.db = Some(Arc::new(FutureMutex::new(client.database("ufc"))));
