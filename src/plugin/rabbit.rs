@@ -47,11 +47,10 @@ impl Plugin for RabbitPlugin {
         }
         let monitor = Arc::clone(self.monitor.as_ref().unwrap());
         let connection = Arc::clone(self.connection.as_ref().unwrap());
-        let mut _connection = connection.lock().await;
-        let channel = _connection.open_channel(None).unwrap();
-        let exchange = Exchange::direct(&channel);
         tokio::spawn(async move {
             let mut _monitor = monitor.lock().await;
+            let mut channel = connection.lock().await.open_channel(None).unwrap();
+            let exchange = Exchange::direct(&channel);
             loop {
                 if let Ok(message) = _monitor.try_recv() {
                     println!("{:?}", message.to_string());
@@ -65,7 +64,6 @@ impl Plugin for RabbitPlugin {
         if !self.plugin_shutdown() {
             return;
         }
-        let connection = self.connection.unwrap().lock().await;
-        connection.close();
+        futures::executor::block_on(async move { self.connection.unwrap().lock().await.close() });
     }
 }
