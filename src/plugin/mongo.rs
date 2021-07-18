@@ -52,7 +52,7 @@ impl Plugin for MongoPlugin {
         tokio::spawn(async move {
             let mut locked_monitor = monitor.lock().await;
             loop {
-                let mut locked_db = db.lock().await;
+                let locked_db = db.lock().await;
                 if let Ok(message) = locked_monitor.try_recv() {
                     let data = message.as_object().unwrap();
                     let collection_name = String::from(data.get("collection").unwrap().as_str().unwrap());

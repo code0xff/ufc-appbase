@@ -37,7 +37,7 @@ impl Plugin for MonitorPlugin {
         }
         let channels = self.channels.as_ref().unwrap().clone();
 
-        let mut plugin_handle: PluginHandle;
+        let plugin_handle: PluginHandle;
         unsafe {
             plugin_handle = APP.get_plugin::<JsonRpcPlugin>();
         }
