@@ -113,7 +113,7 @@ impl Plugin for TendermintPlugin {
                             // data.insert(String::from("value"), Value::String(block_header.to_string()));
                             // let _ = channel.lock().unwrap().send(Value::Object(data));
                         } else {
-                            println!("{:?}", _body.get("error").unwrap());
+                            println!("{:?}", body_map.get("error").unwrap());
                         }
                     }
                 }
