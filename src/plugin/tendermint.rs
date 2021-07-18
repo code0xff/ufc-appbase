@@ -1,13 +1,15 @@
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::sync::Arc;
 
 use appbase::*;
 use futures::lock::Mutex as FutureMutex;
+use rand::Rng;
 use serde_json::{Map, Value};
 
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::plugin::mongo::MongoPlugin;
-use crate::plugin::monitor::MonitorPlugin;
+use crate::plugin::subscription::SubscriptionPlugin;
 use crate::plugin::rabbit::RabbitPlugin;
 use crate::plugin::rocks::RocksPlugin;
 use crate::types::block::{SubscribeBlock, SubscribeStatus};
@@ -19,9 +21,9 @@ pub struct TendermintPlugin {
     monitor: Option<SubscribeHandle>,
 }
 
-type SubscribeBlocks = Arc<FutureMutex<Vec<SubscribeBlock>>>;
+type SubscribeBlocks = Arc<FutureMutex<HashMap<u64, SubscribeBlock>>>;
 
-appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, MonitorPlugin, RabbitPlugin);
+appbase_plugin_requires!(TendermintPlugin; RabbitPlugin);
 
 impl Plugin for TendermintPlugin {
     appbase_plugin_default!(TendermintPlugin);
@@ -40,7 +42,7 @@ impl Plugin for TendermintPlugin {
             return;
         }
         unsafe {
-            self.subscribe_blocks = Some(Arc::new(FutureMutex::new(Vec::new())));
+            self.subscribe_blocks = Some(Arc::new(FutureMutex::new(HashMap::new())));
             self.channel = Some(APP.get_channel(String::from("rabbit")));
             self.monitor = Some(APP.subscribe_channel(String::from("tendermint")));
         }
@@ -58,28 +60,49 @@ impl Plugin for TendermintPlugin {
             let mut locked_monitor = monitor.lock().await;
             loop {
                 if let Ok(message) = locked_monitor.try_recv() {
-                    let block = message.as_object().unwrap();
-                    let block_nodes = block.get("nodes").unwrap().as_array().unwrap();
-                    let start_height = block.get("start_height").unwrap().as_u64().unwrap();
-                    let mut nodes: Vec<String> = Vec::new();
-                    for n in block_nodes.iter() {
-                        nodes.push(String::from(n.as_str().unwrap()));
+                    let message_map = message.as_object().unwrap();
+                    let method = message_map.get("method").unwrap().as_str().unwrap().to_string();
+                    match method {
+                        String::from("subscribe") => {
+                            let params = message_map.get("params").unwrap().as_object().unwrap();
+                            let block_nodes = params.get("nodes").unwrap().as_array().unwrap();
+                            let start_height = params.get("start_height").unwrap().as_u64().unwrap();
+                            let mut nodes: Vec<String> = Vec::new();
+                            for n in block_nodes.iter() {
+                                nodes.push(String::from(n.as_str().unwrap()));
+                            }
+                            let new_subscribe_block = SubscribeBlock {
+                                chain: String::from(params.get("chain").unwrap().as_str().unwrap()),
+                                chain_id: String::from(params.get("chain_id").unwrap().as_str().unwrap()),
+                                start_height,
+                                current_height: start_height,
+                                nodes,
+                                node_index: 0,
+                                status: SubscribeStatus::Requested,
+                            };
+                            let mut locked_subscribe_blocks = subscribe_blocks.lock().await;
+                            let mut rng = rand::thread_rng();
+                            let sub_id = rng.gen::<u64>();
+
+                            locked_subscribe_blocks.insert(sub_id, new_subscribe_block);
+                        }
+                        String::from("unsubscribe") => {
+                            let params = message_map.get("params").unwrap().as_object().unwrap();
+                            let target = params.get("target").unwrap().as_str().unwrap().to_string();
+                            let sub_id = params.get("sub_id").unwrap().as_u64().unwrap();
+
+                            match target {
+                                String::from("block") => {
+                                    let mut locked_subscribe_blocks = subscribe_blocks.lock().await;
+                                    locked_subscribe_blocks.remove(&sub_id);
+                                }
+                            }
+                        }
                     }
-                    let new_subscribe_block = SubscribeBlock {
-                        chain: String::from(block.get("chain").unwrap().as_str().unwrap()),
-                        chain_id: String::from(block.get("chain_id").unwrap().as_str().unwrap()),
-                        start_height,
-                        current_height: start_height,
-                        nodes,
-                        node_index: 0,
-                        status: SubscribeStatus::Requested,
-                    };
-                    let mut locked_subscribe_blocks = subscribe_blocks.lock().await;
-                    locked_subscribe_blocks.push(new_subscribe_block);
                 }
 
                 let mut locked_subscribe_blocks = subscribe_blocks.lock().await;
-                for subscribe_block in locked_subscribe_blocks.iter_mut() {
+                for (_, subscribe_block) in locked_subscribe_blocks.iter_mut() {
                     if subscribe_block.status == SubscribeStatus::Requested && subscribe_block.status == SubscribeStatus::Working {
                         let node_index = usize::try_from(subscribe_block.node_index).unwrap();
                         let node_url = subscribe_block.nodes[node_index].as_str().to_owned() + subscribe_block.current_height.to_string().as_str();

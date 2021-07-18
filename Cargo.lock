@@ -2702,6 +2702,7 @@ dependencies = [
  "jsonrpc-http-server",
  "log",
  "mongodb",
+ "rand 0.8.4",
  "reqwest",
  "rocksdb",
  "serde_json",
