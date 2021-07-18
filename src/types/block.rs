@@ -9,6 +9,7 @@ pub struct SubscribeBlock {
     pub status: SubscribeStatus
 }
 
+#[derive(PartialEq, Clone)]
 pub enum SubscribeStatus {
     Requested,
     Working,

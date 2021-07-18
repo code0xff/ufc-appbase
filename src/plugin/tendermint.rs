@@ -72,6 +72,7 @@ impl Plugin for TendermintPlugin {
                         current_height: start_height,
                         nodes,
                         node_index: 0,
+                        status: SubscribeStatus::Requested,
                     };
                     let mut locked_subscribe_blocks = subscribe_blocks.lock().await;
                     locked_subscribe_blocks.push(new_subscribe_block);
