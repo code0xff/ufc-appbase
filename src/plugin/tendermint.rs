@@ -6,9 +6,10 @@ use futures::lock::Mutex as FutureMutex;
 use serde_json::{Map, Value};
 
 use crate::plugin::jsonrpc::JsonRpcPlugin;
-use crate::plugin::monitor::MonitorPlugin;
-use crate::plugin::rocks::RocksPlugin;
 use crate::plugin::mongo::MongoPlugin;
+use crate::plugin::monitor::MonitorPlugin;
+use crate::plugin::rabbit::RabbitPlugin;
+use crate::plugin::rocks::RocksPlugin;
 use crate::types::block::SubscribeBlock;
 
 pub struct TendermintPlugin {
@@ -20,7 +21,7 @@ pub struct TendermintPlugin {
 
 type SubscribeBlocks = Arc<FutureMutex<Vec<SubscribeBlock>>>;
 
-appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, MonitorPlugin, MongoPlugin);
+appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, MonitorPlugin, RabbitPlugin);
 
 impl Plugin for TendermintPlugin {
     appbase_plugin_default!(TendermintPlugin);
@@ -40,7 +41,7 @@ impl Plugin for TendermintPlugin {
         }
         unsafe {
             self.subscribe_blocks = Some(Arc::new(FutureMutex::new(Vec::new())));
-            self.channel = Some(APP.get_channel(String::from("mongo")));
+            self.channel = Some(APP.get_channel(String::from("rabbit")));
             self.monitor = Some(APP.subscribe_channel(String::from("tendermint")));
         }
     }
@@ -96,16 +97,20 @@ impl Plugin for TendermintPlugin {
 
                             subscribe_block.current_height += 1;
 
-                            let mut data = Map::new();
-                            data.insert(String::from("collection"), Value::String(String::from("block")));
-                            data.insert(String::from("document"), block_header.clone());
+                            //rabbit
+                            let _ = channel.lock().unwrap().send(block_header.clone());
 
-                            channel.lock().unwrap().send(Value::Object(data));
+                            // mongo
+                            // let mut data = Map::new();
+                            // data.insert(String::from("collection"), Value::String(String::from("block")));
+                            // data.insert(String::from("document"), block_header.clone());
+                            // let _ = channel.lock().unwrap().send(Value::Object(data));
 
+                            // rocks
+                            // let mut data = Map::new();
                             // let key = format!("{}:{}:{}", subscribe_block.chain, subscribe_block.chain_id, subscribe_block.current_height);
                             // data.insert(String::from("key"), Value::String(key));
                             // data.insert(String::from("value"), Value::String(block_header.to_string()));
-                            //
                             // let _ = channel.lock().unwrap().send(Value::Object(data));
                         } else {
                             println!("{:?}", _body.get("error").unwrap());
