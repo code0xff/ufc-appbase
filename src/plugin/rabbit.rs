@@ -65,6 +65,6 @@ impl Plugin for RabbitPlugin {
             return;
         }
         let connection = Arc::clone(self.connection.as_ref().unwrap());
-        futures::executor::block_on(async move { connection.unwrap().lock().await.close() });
+        futures::executor::block_on(async move { connection.lock().await.close() });
     }
 }
