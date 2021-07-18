@@ -4,10 +4,6 @@ use amiquip::{Connection, Exchange, Publish};
 use appbase::*;
 use futures::executor;
 use futures::lock::Mutex as FutureMutex;
-use mongodb::{Client, Database};
-use mongodb::bson;
-use mongodb::bson::*;
-use mongodb::options::ClientOptions;
 
 pub struct RabbitPlugin {
     base: PluginBase,
@@ -49,7 +45,7 @@ impl Plugin for RabbitPlugin {
         let connection = Arc::clone(self.connection.as_ref().unwrap());
         tokio::spawn(async move {
             let mut _monitor = monitor.lock().await;
-            let mut channel = connection.lock().await.open_channel(None).unwrap();
+            let channel = connection.lock().await.open_channel(None).unwrap();
             let exchange = Exchange::direct(&channel);
             loop {
                 if let Ok(message) = _monitor.try_recv() {
