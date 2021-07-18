@@ -10,7 +10,7 @@ use crate::plugin::mongo::MongoPlugin;
 use crate::plugin::monitor::MonitorPlugin;
 use crate::plugin::rabbit::RabbitPlugin;
 use crate::plugin::rocks::RocksPlugin;
-use crate::types::block::SubscribeBlock;
+use crate::types::block::{SubscribeBlock, SubscribeStatus};
 
 pub struct TendermintPlugin {
     base: PluginBase,
@@ -79,41 +79,54 @@ impl Plugin for TendermintPlugin {
 
                 let mut locked_subscribe_blocks = subscribe_blocks.lock().await;
                 for subscribe_block in locked_subscribe_blocks.iter_mut() {
-                    if subscribe_block.node_index >= 0 {
+                    if subscribe_block.status == SubscribeStatus::Requested && subscribe_block.status == SubscribeStatus::Working {
                         let node_index = usize::try_from(subscribe_block.node_index).unwrap();
                         let node_url = subscribe_block.nodes[node_index].as_str().to_owned() + subscribe_block.current_height.to_string().as_str();
 
-                        let body = reqwest::get(node_url)
+                        let response = reqwest::get(node_url)
                             .await
-                            .unwrap()
-                            .text()
-                            .await;
+                            .unwrap();
 
-                        let body_map: Map<String, Value> = serde_json::from_str(body.unwrap().as_str()).unwrap();
-                        if body_map.get("error").is_none() {
-                            let result = body_map.get("result").unwrap().as_object().unwrap();
-                            let block = result.get("block").unwrap().as_object().unwrap();
-                            let block_header = block.get("header").unwrap();
-
-                            subscribe_block.current_height += 1;
-
-                            //rabbit
-                            let _ = channel.lock().unwrap().send(block_header.clone());
-
-                            // mongo
-                            // let mut data = Map::new();
-                            // data.insert(String::from("collection"), Value::String(String::from("block")));
-                            // data.insert(String::from("document"), block_header.clone());
-                            // let _ = channel.lock().unwrap().send(Value::Object(data));
-
-                            // rocks
-                            // let mut data = Map::new();
-                            // let key = format!("{}:{}:{}", subscribe_block.chain, subscribe_block.chain_id, subscribe_block.current_height);
-                            // data.insert(String::from("key"), Value::String(key));
-                            // data.insert(String::from("value"), Value::String(block_header.to_string()));
-                            // let _ = channel.lock().unwrap().send(Value::Object(data));
+                        if response.status().is_client_error() {
+                            subscribe_block.status = SubscribeStatus::RequestError;
+                        } else if response.status().is_server_error() {
+                            if usize::from(subscribe_block.node_index) + 1 < subscribe_block.nodes.len() {
+                                subscribe_block.node_index += 1;
+                            } else {
+                                subscribe_block.status = SubscribeStatus::ServerError;
+                            }
                         } else {
-                            println!("{:?}", body_map.get("error").unwrap());
+                            let body = response
+                                .text()
+                                .await;
+
+                            let body_map: Map<String, Value> = serde_json::from_str(body.unwrap().as_str()).unwrap();
+                            if body_map.get("error").is_none() {
+                                let result = body_map.get("result").unwrap().as_object().unwrap();
+                                let block = result.get("block").unwrap().as_object().unwrap();
+                                let block_header = block.get("header").unwrap();
+
+                                subscribe_block.current_height += 1;
+                                subscribe_block.status = SubscribeStatus::Working;
+
+                                //rabbit
+                                let _ = channel.lock().unwrap().send(block_header.clone());
+
+                                // mongo
+                                // let mut data = Map::new();
+                                // data.insert(String::from("collection"), Value::String(String::from("block")));
+                                // data.insert(String::from("document"), block_header.clone());
+                                // let _ = channel.lock().unwrap().send(Value::Object(data));
+
+                                // rocks
+                                // let mut data = Map::new();
+                                // let key = format!("{}:{}:{}", subscribe_block.chain, subscribe_block.chain_id, subscribe_block.current_height);
+                                // data.insert(String::from("key"), Value::String(key));
+                                // data.insert(String::from("value"), Value::String(block_header.to_string()));
+                                // let _ = channel.lock().unwrap().send(Value::Object(data));
+                            } else {
+                                println!("{:?}", body_map.get("error").unwrap());
+                            }
                         }
                     }
                 }
