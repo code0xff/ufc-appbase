@@ -66,9 +66,9 @@ impl Plugin for JsonRpcPlugin {
         }
 
         let io = std::mem::replace(&mut self.io, None).unwrap();
-        let _server = ServerBuilder::new(io);
+        let created_server = ServerBuilder::new(io);
         let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
-        let server = _server.start_http(&socket).unwrap();
+        let server = created_server.start_http(&socket).unwrap();
         self.server = Some(server.close_handle());
         tokio::spawn(async {
             server.wait();

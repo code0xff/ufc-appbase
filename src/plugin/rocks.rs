@@ -43,15 +43,15 @@ impl Plugin for RocksPlugin {
         let monitor = Arc::clone(self.monitor.as_ref().unwrap());
         let db = Arc::clone(self.db.as_ref().unwrap());
         tokio::spawn(async move {
-            let mut _monitor = monitor.lock().await;
+            let mut locked_monitor = monitor.lock().await;
             loop {
-                let mut _db = db.lock().await;
-                if let Ok(message) = _monitor.try_recv() {
+                let mut locked_db = db.lock().await;
+                if let Ok(message) = locked_monitor.try_recv() {
                     let data = message.as_object().unwrap();
                     let key = String::from(data.get("key").unwrap().as_str().unwrap());
                     let value = String::from(data.get("value").unwrap().as_str().unwrap());
 
-                    let _ = _db.put(key.clone(), value);
+                    let _ = locked_db.put(key.clone(), value);
                 }
             }
         });

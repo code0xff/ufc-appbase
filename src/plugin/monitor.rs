@@ -37,11 +37,11 @@ impl Plugin for MonitorPlugin {
         }
         let channels = self.channels.as_ref().unwrap().clone();
 
-        let mut _p1: PluginHandle;
+        let mut plugin_handle: PluginHandle;
         unsafe {
-            _p1 = APP.get_plugin::<JsonRpcPlugin>();
+            plugin_handle = APP.get_plugin::<JsonRpcPlugin>();
         }
-        let mut plugin = _p1.lock().unwrap();
+        let mut plugin = plugin_handle.lock().unwrap();
         let jsonrpc = plugin.downcast_mut::<JsonRpcPlugin>().unwrap();
         jsonrpc.add_sync_method(String::from("subscribe"), move |params: Params| {
             let params: Map<String, Value> = params.parse().unwrap();

@@ -50,14 +50,14 @@ impl Plugin for MongoPlugin {
         let monitor = Arc::clone(self.monitor.as_ref().unwrap());
         let db = Arc::clone(self.db.as_ref().unwrap());
         tokio::spawn(async move {
-            let mut _monitor = monitor.lock().await;
+            let mut locked_monitor = monitor.lock().await;
             loop {
-                let mut _db = db.lock().await;
-                if let Ok(message) = _monitor.try_recv() {
+                let mut locked_db = db.lock().await;
+                if let Ok(message) = locked_monitor.try_recv() {
                     let data = message.as_object().unwrap();
                     let collection_name = String::from(data.get("collection").unwrap().as_str().unwrap());
 
-                    let collection = _db.collection::<Document>(collection_name.as_str());
+                    let collection = locked_db.collection::<Document>(collection_name.as_str());
                     let document = bson::to_document(&data).unwrap();
 
                     println!("{:?}", document);

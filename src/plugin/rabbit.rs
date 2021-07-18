@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use amiquip::{Connection, Exchange, Publish};
 use appbase::*;
-use futures::executor;
 use futures::lock::Mutex as FutureMutex;
 
 pub struct RabbitPlugin {
@@ -44,11 +43,11 @@ impl Plugin for RabbitPlugin {
         let monitor = Arc::clone(self.monitor.as_ref().unwrap());
         let connection = Arc::clone(self.connection.as_ref().unwrap());
         tokio::spawn(async move {
-            let mut _monitor = monitor.lock().await;
+            let mut locked_monitor = monitor.lock().await;
             let channel = connection.lock().await.open_channel(None).unwrap();
             let exchange = Exchange::direct(&channel);
             loop {
-                if let Ok(message) = _monitor.try_recv() {
+                if let Ok(message) = locked_monitor.try_recv() {
                     println!("{:?}", message.to_string());
                     // exchange.publish(Publish::new(message.to_string().as_str().as_bytes(), "ufc"));
                 }

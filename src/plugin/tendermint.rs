@@ -55,14 +55,14 @@ impl Plugin for TendermintPlugin {
         let channel = Arc::clone(self.channel.as_ref().unwrap());
         let subscribe_blocks = Arc::clone(self.subscribe_blocks.as_ref().unwrap());
         tokio::spawn(async move {
-            let mut _monitor = monitor.lock().await;
+            let mut locked_monitor = monitor.lock().await;
             loop {
-                if let Ok(message) = _monitor.try_recv() {
+                if let Ok(message) = locked_monitor.try_recv() {
                     let block = message.as_object().unwrap();
-                    let _nodes = block.get("nodes").unwrap().as_array().unwrap();
+                    let block_nodes = block.get("nodes").unwrap().as_array().unwrap();
                     let start_height = block.get("start_height").unwrap().as_u64().unwrap();
                     let mut nodes: Vec<String> = Vec::new();
-                    for n in _nodes.iter() {
+                    for n in block_nodes.iter() {
                         nodes.push(String::from(n.as_str().unwrap()));
                     }
                     let new_subscribe_block = SubscribeBlock {
@@ -73,12 +73,12 @@ impl Plugin for TendermintPlugin {
                         nodes,
                         node_index: 0,
                     };
-                    let mut _subscribe_blocks = subscribe_blocks.lock().await;
-                    _subscribe_blocks.push(new_subscribe_block);
+                    let mut locked_subscribe_blocks = subscribe_blocks.lock().await;
+                    locked_subscribe_blocks.push(new_subscribe_block);
                 }
 
-                let mut _subscribe_blocks = subscribe_blocks.lock().await;
-                for subscribe_block in _subscribe_blocks.iter_mut() {
+                let mut locked_subscribe_blocks = subscribe_blocks.lock().await;
+                for subscribe_block in locked_subscribe_blocks.iter_mut() {
                     if subscribe_block.node_index >= 0 {
                         let node_index = usize::try_from(subscribe_block.node_index).unwrap();
                         let node_url = subscribe_block.nodes[node_index].as_str().to_owned() + subscribe_block.current_height.to_string().as_str();
@@ -89,9 +89,9 @@ impl Plugin for TendermintPlugin {
                             .text()
                             .await;
 
-                        let _body: Map<String, Value> = serde_json::from_str(body.unwrap().as_str()).unwrap();
-                        if _body.get("error").is_none() {
-                            let result = _body.get("result").unwrap().as_object().unwrap();
+                        let body_map: Map<String, Value> = serde_json::from_str(body.unwrap().as_str()).unwrap();
+                        if body_map.get("error").is_none() {
+                            let result = body_map.get("result").unwrap().as_object().unwrap();
                             let block = result.get("block").unwrap().as_object().unwrap();
                             let block_header = block.get("header").unwrap();
 
