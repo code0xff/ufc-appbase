@@ -34,13 +34,11 @@ impl Plugin for MongoPlugin {
             return;
         }
 
-        unsafe {
-            let mut client_options = executor::block_on(async { ClientOptions::parse("mongodb://localhost:27017").await }).unwrap();
-            client_options.app_name = Some(String::from("MongoDB"));
-            let client = Client::with_options(client_options).unwrap();
-            self.db = Some(Arc::new(FutureMutex::new(client.database("ufc"))));
-            self.monitor = Some(APP.subscribe_channel(String::from("mongo")));
-        }
+        let mut client_options = executor::block_on(async { ClientOptions::parse("mongodb://localhost:27017").await }).unwrap();
+        client_options.app_name = Some(String::from("MongoDB"));
+        let client = Client::with_options(client_options).unwrap();
+        self.db = Some(Arc::new(FutureMutex::new(client.database("ufc"))));
+        self.monitor = Some(app::subscribe_channel(String::from("mongo")));
     }
 
     fn startup(&mut self) {

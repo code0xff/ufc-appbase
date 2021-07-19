@@ -14,7 +14,7 @@ jsonrpc-http-server = "17.1.0"
 log = "0.4.14"
 serde_json = "1.0.64"
 env_logger = "0.9.0"
-reqwest = "0.11.4"
+reqwest = { version = "0.11", features = ["blocking", "json"] }
 futures = "0.3.15"
 rocksdb = "0.16.0"
 amiquip = { version = "0.4", default-features = false }

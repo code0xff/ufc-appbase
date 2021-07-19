@@ -1,4 +1,4 @@
-use appbase::APP;
+use appbase::app;
 
 use crate::plugin::tendermint::TendermintPlugin;
 
@@ -9,10 +9,8 @@ mod validation;
 #[tokio::main]
 async fn main() {
     env_logger::init();
-    unsafe {
-        APP.register_plugin::<TendermintPlugin>();
-        APP.initialize();
-        APP.startup();
-        APP.execute().await; // XXX: a better way for graceful shutdown?
-    }
+    app::register_plugin::<TendermintPlugin>();
+    app::initialize();
+    app::startup();
+    app::execute().await; // XXX: a better way for graceful shutdown?
 }

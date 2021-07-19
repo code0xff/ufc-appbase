@@ -74,9 +74,7 @@ impl Plugin for JsonRpcPlugin {
             server.wait();
         });
 
-        unsafe {
-            APP.plugin_started::<JsonRpcPlugin>();
-        }
+        app::plugin_started::<JsonRpcPlugin>();
     }
 
     fn shutdown(&mut self) {

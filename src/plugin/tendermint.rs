@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use appbase::*;
-use futures::lock::Mutex as FutureMutex;
-use jsonrpc_core::{Params, BoxFuture};
+use jsonrpc_core::*;
 use serde_json::{Map, Value};
 
 use crate::plugin::jsonrpc::JsonRpcPlugin;
@@ -18,10 +17,9 @@ pub struct TendermintPlugin {
     base: PluginBase,
     subscribe_blocks: Option<SubscribeBlocks>,
     channel: Option<ChannelHandle>,
-    monitor: Option<SubscribeHandle>,
 }
 
-type SubscribeBlocks = Arc<FutureMutex<HashMap<String, SubscribeBlock>>>;
+type SubscribeBlocks = Arc<Mutex<HashMap<String, SubscribeBlock>>>;
 
 appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, RabbitPlugin);
 
@@ -33,7 +31,6 @@ impl Plugin for TendermintPlugin {
             base: PluginBase::new(),
             subscribe_blocks: None,
             channel: None,
-            monitor: None,
         }
     }
 
@@ -41,19 +38,14 @@ impl Plugin for TendermintPlugin {
         if !self.plugin_initialize() {
             return;
         }
-        unsafe {
-            self.subscribe_blocks = Some(Arc::new(FutureMutex::new(HashMap::new())));
-            self.channel = Some(APP.get_channel(String::from("rabbit")));
-        }
+        self.subscribe_blocks = Some(Arc::new(Mutex::new(HashMap::new())));
+        self.channel = Some(app::get_channel(String::from("rabbit")));
 
-        let plugin_handle: PluginHandle;
-        unsafe {
-            plugin_handle = APP.get_plugin::<JsonRpcPlugin>();
-        }
+        let plugin_handle = app::get_plugin::<JsonRpcPlugin>();
         let mut plugin = plugin_handle.lock().unwrap();
         let jsonrpc = plugin.downcast_mut::<JsonRpcPlugin>().unwrap();
         let subscribe_blocks = Arc::clone(self.subscribe_blocks.as_ref().unwrap());
-        jsonrpc.add_method(String::from("tm_subscribe_block"), move |params: Params| async {
+        jsonrpc.add_sync_method(String::from("tm_subscribe_block"), move |params: Params| {
             let params: Map<String, Value> = params.parse().unwrap();
             let verified = subscribe::verify(&params);
             if verified.is_err() {
@@ -76,11 +68,12 @@ impl Plugin for TendermintPlugin {
                 node_index: 0,
                 status: SubscribeStatus::Requested,
             };
-            let mut locked_subscribe_blocks = subscribe_blocks.lock().await;
-            let task_id = format!("{}:{}", chain, chain_id);
+
+            let mut locked_subscribe_blocks = subscribe_blocks.lock().unwrap();
+            let task_id = format!("{}:{}", chain.clone(), chain_id.clone());
             locked_subscribe_blocks.insert(task_id.clone(), new_subscribe_block);
 
-            futures::future::ready(Ok(Value::String(format!("subscription requested!"))))
+            Ok(Value::String(format!("subscription requested! task_id={}", task_id)))
         });
 
         // jsonrpc.add_sync_method(String::from("tm_unsubscribe_block"), move |params: Params| {
@@ -102,9 +95,9 @@ impl Plugin for TendermintPlugin {
         let subscribe_blocks = Arc::clone(self.subscribe_blocks.as_ref().unwrap());
         tokio::spawn(async move {
             loop {
-                let mut locked_subscribe_blocks = subscribe_blocks.lock().await;
+                let mut locked_subscribe_blocks = subscribe_blocks.lock().unwrap();
                 for (_, subscribe_block) in locked_subscribe_blocks.iter_mut() {
-                    if subscribe_block.status == SubscribeStatus::Requested && subscribe_block.status == SubscribeStatus::Working {
+                    if subscribe_block.status == SubscribeStatus::Requested || subscribe_block.status == SubscribeStatus::Working {
                         let node_index = usize::try_from(subscribe_block.node_index).unwrap();
                         let node_url = subscribe_block.nodes[node_index].as_str().to_owned() + subscribe_block.current_height.to_string().as_str();
 
@@ -123,9 +116,10 @@ impl Plugin for TendermintPlugin {
                         } else {
                             let body = response
                                 .text()
-                                .await;
+                                .await
+                                .unwrap();
 
-                            let body_map: Map<String, Value> = serde_json::from_str(body.unwrap().as_str()).unwrap();
+                            let body_map: Map<String, Value> = serde_json::from_str(body.as_str()).unwrap();
                             if body_map.get("error").is_none() {
                                 let result = body_map.get("result").unwrap().as_object().unwrap();
                                 let block = result.get("block").unwrap().as_object().unwrap();
@@ -134,8 +128,10 @@ impl Plugin for TendermintPlugin {
                                 subscribe_block.current_height += 1;
                                 subscribe_block.status = SubscribeStatus::Working;
 
+
+
                                 //rabbit
-                                let _ = channel.lock().unwrap().send(block_header.clone());
+                                // let _ = channel.lock().unwrap().send(block_header.clone());
 
                                 // mongo
                                 // let mut data = Map::new();

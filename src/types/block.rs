@@ -1,4 +1,4 @@
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct SubscribeBlock {
     pub chain: String,
     pub chain_id: String,
@@ -9,7 +9,7 @@ pub struct SubscribeBlock {
     pub status: SubscribeStatus
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum SubscribeStatus {
     Requested,
     Working,

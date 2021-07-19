@@ -30,10 +30,8 @@ impl Plugin for RabbitPlugin {
             return;
         }
 
-        unsafe {
-            self.connection = Some(Arc::new(FutureMutex::new(Connection::insecure_open("amqp://rabbitmq:rabbitmq@localhost:5672").unwrap())));
-            self.monitor = Some(APP.subscribe_channel(String::from("rabbit")));
-        }
+        self.connection = Some(Arc::new(FutureMutex::new(Connection::insecure_open("amqp://rabbitmq:rabbitmq@localhost:5672").unwrap())));
+        self.monitor = Some(app::subscribe_channel(String::from("rabbit")));
     }
 
     fn startup(&mut self) {

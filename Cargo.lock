@@ -81,7 +81,7 @@ dependencies = [
 [[package]]
 name = "appbase"
 version = "0.1.0"
-source = "git+https://github.com/turnpike/appbase-rs#e4875f1ab6916f5052185f002ad464d8bfff9e32"
+source = "git+https://github.com/turnpike/appbase-rs#b484ea1749297d865677534125836b4ba7939934"
 dependencies = [
  "futures",
  "jsonrpc-core",
@@ -2034,6 +2034,7 @@ dependencies = [
  "percent-encoding 2.1.0",
  "pin-project-lite 0.2.7",
  "serde",
+ "serde_json",
  "serde_urlencoded",
  "tokio 1.8.1",
  "tokio-native-tls",

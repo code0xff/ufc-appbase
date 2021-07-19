@@ -30,10 +30,8 @@ impl Plugin for RocksPlugin {
             return;
         }
 
-        unsafe {
-            self.db = Some(Arc::new(FutureMutex::new(DB::open_default("rocks").unwrap())));
-            self.monitor = Some(APP.subscribe_channel(String::from("rocks")));
-        }
+        self.db = Some(Arc::new(FutureMutex::new(DB::open_default("rocks").unwrap())));
+        self.monitor = Some(app::subscribe_channel(String::from("rocks")));
     }
 
     fn startup(&mut self) {
