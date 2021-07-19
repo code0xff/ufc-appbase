@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use appbase::*;
+use futures::executor;
 use futures::lock::Mutex as FutureMutex;
 use mongodb::{Client, Database};
 use mongodb::bson;
 use mongodb::bson::*;
 use mongodb::options::ClientOptions;
-use futures::executor;
 
 pub struct MongoPlugin {
     base: PluginBase,
@@ -57,8 +57,10 @@ impl Plugin for MongoPlugin {
 
                     let collection = locked_db.collection::<Document>(collection_name.as_str());
                     let document = bson::to_document(&data).unwrap();
-
                     println!("{:?}", document);
+
+
+                    let _ = collection.insert_one(document, None).await;
                 }
             }
         });

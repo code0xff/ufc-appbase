@@ -1,7 +1,6 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use appbase::*;
-use futures::lock::Mutex as FutureMutex;
 use rocksdb::{DB, DBWithThreadMode, SingleThreaded};
 
 pub struct RocksPlugin {
@@ -10,7 +9,7 @@ pub struct RocksPlugin {
     monitor: Option<SubscribeHandle>,
 }
 
-type RocksDB = Arc<FutureMutex<DBWithThreadMode<SingleThreaded>>>;
+type RocksDB = Arc<Mutex<DBWithThreadMode<SingleThreaded>>>;
 
 appbase_plugin_requires!(RocksPlugin; );
 
@@ -30,7 +29,7 @@ impl Plugin for RocksPlugin {
             return;
         }
 
-        self.db = Some(Arc::new(FutureMutex::new(DB::open_default("rocks").unwrap())));
+        self.db = Some(Arc::new(Mutex::new(DB::open_default("rocks").unwrap())));
         self.monitor = Some(app::subscribe_channel(String::from("rocks")));
     }
 
@@ -43,7 +42,7 @@ impl Plugin for RocksPlugin {
         tokio::spawn(async move {
             let mut locked_monitor = monitor.lock().await;
             loop {
-                let locked_db = db.lock().await;
+                let locked_db = db.lock().unwrap();
                 if let Ok(message) = locked_monitor.try_recv() {
                     let data = message.as_object().unwrap();
                     let key = String::from(data.get("key").unwrap().as_str().unwrap());

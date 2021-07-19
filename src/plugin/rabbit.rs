@@ -46,8 +46,7 @@ impl Plugin for RabbitPlugin {
             let exchange = Exchange::direct(&channel);
             loop {
                 if let Ok(message) = locked_monitor.try_recv() {
-                    println!("{:?}", message.to_string());
-                    // exchange.publish(Publish::new(message.to_string().as_str().as_bytes(), "ufc"));
+                    let _ = exchange.publish(Publish::new(message.to_string().as_str().as_bytes(), "ufc"));
                 }
             }
         });
