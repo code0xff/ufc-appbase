@@ -1,14 +1,6 @@
 use serde_json::{Map, Value};
 
 pub fn verify(params: &Map<String, Value>) -> Result<String, String> {
-    let chain = params.get("chain");
-    if chain.is_none() || !chain.unwrap().is_string() {
-        return Err(String::from("invalid chain value"));
-    }
-    let target = params.get("target");
-    if target.is_none() || !target.unwrap().is_string() {
-        return Err(String::from("invalid target value"));
-    }
     let chain_id = params.get("chain_id");
     if chain_id.is_none() || !chain_id.unwrap().is_string() {
         return Err(String::from("invalid chain_id value"));

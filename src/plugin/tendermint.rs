@@ -4,15 +4,15 @@ use std::sync::Arc;
 
 use appbase::*;
 use futures::lock::Mutex as FutureMutex;
-use rand::Rng;
+use jsonrpc_core::{Params, BoxFuture};
 use serde_json::{Map, Value};
 
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::plugin::mongo::MongoPlugin;
-use crate::plugin::subscription::SubscriptionPlugin;
 use crate::plugin::rabbit::RabbitPlugin;
 use crate::plugin::rocks::RocksPlugin;
 use crate::types::block::{SubscribeBlock, SubscribeStatus};
+use crate::validation::subscribe;
 
 pub struct TendermintPlugin {
     base: PluginBase,
@@ -21,9 +21,9 @@ pub struct TendermintPlugin {
     monitor: Option<SubscribeHandle>,
 }
 
-type SubscribeBlocks = Arc<FutureMutex<HashMap<u64, SubscribeBlock>>>;
+type SubscribeBlocks = Arc<FutureMutex<HashMap<String, SubscribeBlock>>>;
 
-appbase_plugin_requires!(TendermintPlugin; RabbitPlugin);
+appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, RabbitPlugin);
 
 impl Plugin for TendermintPlugin {
     appbase_plugin_default!(TendermintPlugin);
@@ -44,8 +44,53 @@ impl Plugin for TendermintPlugin {
         unsafe {
             self.subscribe_blocks = Some(Arc::new(FutureMutex::new(HashMap::new())));
             self.channel = Some(APP.get_channel(String::from("rabbit")));
-            self.monitor = Some(APP.subscribe_channel(String::from("tendermint")));
         }
+
+        let plugin_handle: PluginHandle;
+        unsafe {
+            plugin_handle = APP.get_plugin::<JsonRpcPlugin>();
+        }
+        let mut plugin = plugin_handle.lock().unwrap();
+        let jsonrpc = plugin.downcast_mut::<JsonRpcPlugin>().unwrap();
+        let subscribe_blocks = Arc::clone(self.subscribe_blocks.as_ref().unwrap());
+        jsonrpc.add_method(String::from("tm_subscribe_block"), move |params: Params| async {
+            let params: Map<String, Value> = params.parse().unwrap();
+            let verified = subscribe::verify(&params);
+            if verified.is_err() {
+                return Ok(Value::String(verified.unwrap_err()));
+            }
+            let chain = String::from("tendermint");
+            let chain_id = String::from(params.get("chain_id").unwrap().as_str().unwrap());
+            let block_nodes = params.get("nodes").unwrap().as_array().unwrap();
+            let start_height = params.get("start_height").unwrap().as_u64().unwrap();
+            let mut nodes: Vec<String> = Vec::new();
+            for n in block_nodes.iter() {
+                nodes.push(String::from(n.as_str().unwrap()));
+            }
+            let new_subscribe_block = SubscribeBlock {
+                chain: chain.clone(),
+                chain_id: chain_id.clone(),
+                start_height,
+                current_height: start_height,
+                nodes,
+                node_index: 0,
+                status: SubscribeStatus::Requested,
+            };
+            let mut locked_subscribe_blocks = subscribe_blocks.lock().await;
+            let task_id = format!("{}:{}", chain, chain_id);
+            locked_subscribe_blocks.insert(task_id.clone(), new_subscribe_block);
+
+            futures::future::ready(Ok(Value::String(format!("subscription requested!"))))
+        });
+
+        // jsonrpc.add_sync_method(String::from("tm_unsubscribe_block"), move |params: Params| {
+        //     let params: Map<String, Value> = params.parse().unwrap();
+        //     let task_id = params.get("task_id").unwrap().as_str().unwrap().to_string();
+        //
+        //     locked_subscribe_blocks.remove(&task_id);
+        //
+        //     Ok(Value::String(format!("unsubscription requested! task_id={}", task_id)))
+        // });
     }
 
     fn startup(&mut self) {
@@ -53,54 +98,10 @@ impl Plugin for TendermintPlugin {
             return;
         }
 
-        let monitor = Arc::clone(self.monitor.as_ref().unwrap());
         let channel = Arc::clone(self.channel.as_ref().unwrap());
         let subscribe_blocks = Arc::clone(self.subscribe_blocks.as_ref().unwrap());
         tokio::spawn(async move {
-            let mut locked_monitor = monitor.lock().await;
             loop {
-                if let Ok(message) = locked_monitor.try_recv() {
-                    let message_map = message.as_object().unwrap();
-                    let method = message_map.get("method").unwrap().as_str().unwrap().to_string();
-                    match method {
-                        String::from("subscribe") => {
-                            let params = message_map.get("params").unwrap().as_object().unwrap();
-                            let block_nodes = params.get("nodes").unwrap().as_array().unwrap();
-                            let start_height = params.get("start_height").unwrap().as_u64().unwrap();
-                            let mut nodes: Vec<String> = Vec::new();
-                            for n in block_nodes.iter() {
-                                nodes.push(String::from(n.as_str().unwrap()));
-                            }
-                            let new_subscribe_block = SubscribeBlock {
-                                chain: String::from(params.get("chain").unwrap().as_str().unwrap()),
-                                chain_id: String::from(params.get("chain_id").unwrap().as_str().unwrap()),
-                                start_height,
-                                current_height: start_height,
-                                nodes,
-                                node_index: 0,
-                                status: SubscribeStatus::Requested,
-                            };
-                            let mut locked_subscribe_blocks = subscribe_blocks.lock().await;
-                            let mut rng = rand::thread_rng();
-                            let sub_id = rng.gen::<u64>();
-
-                            locked_subscribe_blocks.insert(sub_id, new_subscribe_block);
-                        }
-                        String::from("unsubscribe") => {
-                            let params = message_map.get("params").unwrap().as_object().unwrap();
-                            let target = params.get("target").unwrap().as_str().unwrap().to_string();
-                            let sub_id = params.get("sub_id").unwrap().as_u64().unwrap();
-
-                            match target {
-                                String::from("block") => {
-                                    let mut locked_subscribe_blocks = subscribe_blocks.lock().await;
-                                    locked_subscribe_blocks.remove(&sub_id);
-                                }
-                            }
-                        }
-                    }
-                }
-
                 let mut locked_subscribe_blocks = subscribe_blocks.lock().await;
                 for (_, subscribe_block) in locked_subscribe_blocks.iter_mut() {
                     if subscribe_block.status == SubscribeStatus::Requested && subscribe_block.status == SubscribeStatus::Working {
