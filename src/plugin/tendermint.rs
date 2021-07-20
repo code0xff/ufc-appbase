@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -10,7 +9,6 @@ use jsonrpc_core::*;
 use serde_json::{Map, Value};
 
 use crate::plugin::jsonrpc::JsonRpcPlugin;
-use crate::plugin::mongo::MongoPlugin;
 use crate::plugin::rabbit::RabbitPlugin;
 use crate::plugin::rocks::RocksPlugin;
 use crate::types::block::{BlockTask, SubscribeBlock, SubscribeStatus};
@@ -26,6 +24,15 @@ pub struct TendermintPlugin {
 
 type BlockTasks = Arc<Mutex<HashMap<String, BlockTask>>>;
 type SubscribeBlocks = Arc<FutureMutex<HashMap<String, SubscribeBlock>>>;
+
+impl TendermintPlugin {
+    pub fn gen_msg(method: String, value: Map<String, Value>) -> Value {
+        let mut message = Map::new();
+        message.insert(String::from("method"), Value::String(method));
+        message.insert(String::from("params"), Value::Object(value));
+        Value::Object(message)
+    }
+}
 
 appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, RabbitPlugin);
 
@@ -50,6 +57,7 @@ impl Plugin for TendermintPlugin {
         self.subscribe_blocks = Some(Arc::new(FutureMutex::new(HashMap::new())));
         let mut channels: HashMap<String, ChannelHandle> = HashMap::new();
         channels.insert(String::from("tendermint"), app::get_channel(String::from("tendermint")));
+        channels.insert(String::from("rocks"), app::get_channel(String::from("rocks")));
         self.channels = Some(channels.to_owned());
         self.monitor = Some(app::subscribe_channel(String::from("tendermint")));
 
@@ -64,25 +72,12 @@ impl Plugin for TendermintPlugin {
             if verified.is_err() {
                 return Box::new(futures::future::ready(Ok(Value::String(verified.unwrap_err()))));
             }
-            let mut message = Map::new();
-            message.insert(String::from("method"), Value::String(String::from("subscribe_block")));
-            message.insert(String::from("params"), Value::Object(params.clone()));
-            let _ = tendermint_channel.lock().unwrap().send(Value::Object(message));
+            let message = Self::gen_msg(String::from("subscribe_block"), params.clone());
+            let _ = tendermint_channel.lock().unwrap().send(message);
 
             let task_id = format!("{}:{}", "tendermint", params.get("chain_id").unwrap().as_str().unwrap());
-            let block_nodes = params.get("nodes").unwrap().as_array().unwrap();
-
-            let mut nodes: Vec<String> = Vec::new();
-            for n in block_nodes.iter() {
-                nodes.push(String::from(n.as_str().unwrap()));
-            }
-            let block_task = BlockTask {
-                chain: String::from("tendermint"),
-                chain_id: String::from(params.get("chain_id").unwrap().as_str().unwrap()),
-                start_height: params.get("start_height").unwrap().as_u64().unwrap(),
-                nodes,
-            };
-            block_tasks.lock().unwrap().insert(task_id.clone(), block_task);
+            let new_block_task = BlockTask::new(String::from("tendermint"), &params);
+            block_tasks.lock().unwrap().insert(task_id.clone(), new_block_task);
 
             Box::new(futures::future::ready(Ok(Value::String(format!("subscription requested! task_id={}", task_id)))))
         });
@@ -96,10 +91,8 @@ impl Plugin for TendermintPlugin {
                 return Box::new(futures::future::ready(Ok(Value::String(verified.unwrap_err()))));
             }
 
-            let mut message = Map::new();
-            message.insert(String::from("method"), Value::String(String::from("unsubscribe_block")));
-            message.insert(String::from("params"), Value::Object(params.clone()));
-            let _ = tendermint_channel.lock().unwrap().send(Value::Object(message));
+            let message = Self::gen_msg(String::from("unsubscribe_block"), params.clone());
+            let _ = tendermint_channel.lock().unwrap().send(message);
 
             let task_id = params.get("task_id").unwrap().as_str().unwrap();
             block_tasks.lock().unwrap().remove(task_id.clone());
@@ -125,6 +118,7 @@ impl Plugin for TendermintPlugin {
         }
         let monitor = Arc::clone(self.monitor.as_ref().unwrap());
         let subscribe_blocks = Arc::clone(self.subscribe_blocks.as_ref().unwrap());
+        let rocks_channel = Arc::clone(self.channels.as_ref().unwrap().get("rocks").unwrap());
         tokio::spawn(async move {
             let mut locked_monitor = monitor.lock().await;
             loop {
@@ -135,25 +129,8 @@ impl Plugin for TendermintPlugin {
                     let method = String::from(message_map.get("method").unwrap().as_str().unwrap());
                     let params = message_map.get("params").unwrap().as_object().unwrap();
                     if method == String::from("subscribe_block") {
-                        let chain = String::from("tendermint");
-                        let chain_id = String::from(params.get("chain_id").unwrap().as_str().unwrap());
-                        let block_nodes = params.get("nodes").unwrap().as_array().unwrap();
-                        let start_height = params.get("start_height").unwrap().as_u64().unwrap();
-                        let mut nodes: Vec<String> = Vec::new();
-                        for n in block_nodes.iter() {
-                            nodes.push(String::from(n.as_str().unwrap()));
-                        }
-                        let new_subscribe_block = SubscribeBlock {
-                            chain: chain.clone(),
-                            chain_id: chain_id.clone(),
-                            start_height,
-                            current_height: start_height,
-                            nodes,
-                            node_index: 0,
-                            status: SubscribeStatus::Requested,
-                        };
-
-                        locked_subscribe_blocks.insert(format!("{}:{}", chain.clone(), chain_id.clone()), new_subscribe_block);
+                        let new_subscribe_block = SubscribeBlock::new(String::from("tendermint"), &params);
+                        locked_subscribe_blocks.insert(format!("{}:{}", String::from("tendermint"), new_subscribe_block.chain_id), new_subscribe_block);
                     } else if method == String::from("unsubscribe_block") {
                         let chain = String::from(params.get("task_id").unwrap().as_str().unwrap());
                         locked_subscribe_blocks.remove(&chain);
@@ -161,21 +138,17 @@ impl Plugin for TendermintPlugin {
                 }
 
                 for (_, subscribe_block) in locked_subscribe_blocks.iter_mut() {
-                    if subscribe_block.status == SubscribeStatus::Requested || subscribe_block.status == SubscribeStatus::Working {
-                        let node_index = usize::try_from(subscribe_block.node_index).unwrap();
-                        let node_url = subscribe_block.nodes[node_index].as_str().to_owned() + subscribe_block.current_height.to_string().as_str();
-
-                        let response = reqwest::get(node_url)
+                    if subscribe_block.is_workable() {
+                        let request_url = subscribe_block.request_url();
+                        let response = reqwest::get(request_url)
                             .await
                             .unwrap();
 
                         if response.status().is_client_error() {
-                            subscribe_block.status = SubscribeStatus::RequestError;
-                        } else if response.status().is_server_error() {
-                            if usize::from(subscribe_block.node_index) + 1 < subscribe_block.nodes.len() {
+                            if response.status().as_u16() == 404 && usize::from(subscribe_block.node_index) + 1 < subscribe_block.nodes.len() {
                                 subscribe_block.node_index += 1;
                             } else {
-                                subscribe_block.status = SubscribeStatus::ServerError;
+                                subscribe_block.status = SubscribeStatus::Error;
                             }
                         } else {
                             let body = response
@@ -196,18 +169,9 @@ impl Plugin for TendermintPlugin {
                                 // rabbit
                                 // let _ = rabbit_channel.lock().unwrap().send(block_header.clone());
 
-                                // mongo
-                                // let mut data = Map::new();
-                                // data.insert(String::from("collection"), Value::String(String::from("block")));
-                                // data.insert(String::from("document"), block_header.clone());
-                                // let _ = mongo_channel.lock().unwrap().send(Value::Object(data));
-
                                 // rocks
-                                // let mut data = Map::new();
-                                // let key = format!("{}:{}:{}", subscribe_block.chain, subscribe_block.chain_id, subscribe_block.current_height);
-                                // data.insert(String::from("key"), Value::String(key));
-                                // data.insert(String::from("value"), Value::String(block_header.to_string()));
-                                // let _ = channel.lock().unwrap().send(Value::Object(data));
+                                let put_message = RocksPlugin::gen_msg(String::from("put"), format!("{}:{}:{}", subscribe_block.chain, subscribe_block.chain_id, subscribe_block.current_height), block_header.clone());
+                                let _ = rocks_channel.lock().unwrap().send(put_message);
                             } else {
                                 println!("{:?}", body_map.get("error").unwrap());
                             }

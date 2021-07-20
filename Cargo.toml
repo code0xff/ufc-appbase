@@ -19,6 +19,7 @@ futures = "0.3.15"
 rocksdb = "0.16.0"
 amiquip = { version = "0.4", default-features = false }
 rand = "0.8.4"
+mysql = "*"
 
 [dependencies.mongodb]
 version = "2.0.0-beta.2"
