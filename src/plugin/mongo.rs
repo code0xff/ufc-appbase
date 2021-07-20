@@ -34,9 +34,9 @@ impl Plugin for MongoPlugin {
             return;
         }
 
-        let mut client_options = executor::block_on(async { ClientOptions::parse("mongodb://localhost:27017").await }).unwrap();
-        client_options.app_name = Some(String::from("MongoDB"));
-        let client = Client::with_options(client_options).unwrap();
+        let mut client_opts = executor::block_on(async { ClientOptions::parse("mongodb://localhost:27017").await }).unwrap();
+        client_opts.app_name = Some(String::from("MongoDB"));
+        let client = Client::with_options(client_opts).unwrap();
         self.db = Some(Arc::new(FutureMutex::new(client.database("ufc"))));
         self.monitor = Some(app::subscribe_channel(String::from("mongo")));
     }
@@ -48,19 +48,18 @@ impl Plugin for MongoPlugin {
         let monitor = Arc::clone(self.monitor.as_ref().unwrap());
         let db = Arc::clone(self.db.as_ref().unwrap());
         tokio::spawn(async move {
-            let mut locked_monitor = monitor.lock().await;
+            let mut mon_lock = monitor.lock().await;
             loop {
-                let locked_db = db.lock().await;
-                if let Ok(message) = locked_monitor.try_recv() {
-                    let data = message.as_object().unwrap();
-                    let collection_name = String::from(data.get("collection").unwrap().as_str().unwrap());
+                let db_lock = db.lock().await;
+                if let Ok(msg) = mon_lock.try_recv() {
+                    let map = msg.as_object().unwrap();
+                    let coll_nm = String::from(map.get("collection").unwrap().as_str().unwrap());
 
-                    let collection = locked_db.collection::<Document>(collection_name.as_str());
-                    let document = bson::to_document(&data).unwrap();
-                    println!("{:?}", document);
+                    let coll = db_lock.collection::<Document>(coll_nm.as_str());
+                    let doc = bson::to_document(&map).unwrap();
+                    println!("{:?}", doc);
 
-
-                    let _ = collection.insert_one(document, None).await;
+                    let _ = coll.insert_one(doc, None).await;
                 }
             }
         });

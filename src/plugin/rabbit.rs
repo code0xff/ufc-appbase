@@ -6,7 +6,7 @@ use futures::lock::Mutex as FutureMutex;
 
 pub struct RabbitPlugin {
     base: PluginBase,
-    connection: Option<RabbitConnection>,
+    conn: Option<RabbitConnection>,
     monitor: Option<SubscribeHandle>,
 }
 
@@ -20,7 +20,7 @@ impl Plugin for RabbitPlugin {
     fn new() -> Self {
         RabbitPlugin {
             base: PluginBase::new(),
-            connection: None,
+            conn: None,
             monitor: None,
         }
     }
@@ -30,7 +30,7 @@ impl Plugin for RabbitPlugin {
             return;
         }
 
-        self.connection = Some(Arc::new(FutureMutex::new(Connection::insecure_open("amqp://rabbitmq:rabbitmq@localhost:5672").unwrap())));
+        self.conn = Some(Arc::new(FutureMutex::new(Connection::insecure_open("amqp://rabbitmq:rabbitmq@localhost:5672").unwrap())));
         self.monitor = Some(app::subscribe_channel(String::from("rabbit")));
     }
 
@@ -39,14 +39,14 @@ impl Plugin for RabbitPlugin {
             return;
         }
         let monitor = Arc::clone(self.monitor.as_ref().unwrap());
-        let connection = Arc::clone(self.connection.as_ref().unwrap());
+        let conn = Arc::clone(self.conn.as_ref().unwrap());
         tokio::spawn(async move {
-            let mut locked_monitor = monitor.lock().await;
-            let channel = connection.lock().await.open_channel(None).unwrap();
+            let mut mon_lock = monitor.lock().await;
+            let channel = conn.lock().await.open_channel(None).unwrap();
             let exchange = Exchange::direct(&channel);
             loop {
-                if let Ok(message) = locked_monitor.try_recv() {
-                    let _ = exchange.publish(Publish::new(message.to_string().as_str().as_bytes(), "ufc"));
+                if let Ok(msg) = mon_lock.try_recv() {
+                    let _ = exchange.publish(Publish::new(msg.as_str().unwrap().as_bytes(), "ufc"));
                 }
             }
         });
