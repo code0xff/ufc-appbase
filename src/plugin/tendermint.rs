@@ -167,7 +167,7 @@ impl Plugin for TendermintPlugin {
 
                                     println!("{:?}", block_header);
                                     // rabbit
-                                    // let _ = rabbit_channel.lock().unwrap().send(block_header.clone());
+                                    // let _ = rabbit_channel.lock().unwrap().send(Value::String(block_header.to_string()));
 
                                     // rocks
                                     let msg = RocksPlugin::gen_msg(String::from("put"), sub_block.block_id(), Some(Value::String(block_header.to_string())));
