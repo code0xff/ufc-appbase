@@ -1,4 +1,6 @@
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+
 use crate::types::block::SubscribeStatus::{Requested, Working};
 
 #[derive(Debug, Clone)]
@@ -35,10 +37,23 @@ impl SubscribeBlock {
     pub fn is_workable(&self) -> bool {
         vec!(Requested, Working).contains(&self.status)
     }
+
+    pub fn task_id(&self) -> String {
+        format!("{}:{}", self.chain, self.chain_id)
+    }
+
+    pub fn block_id(&self) -> String {
+        format!("{}:{}:{}", self.chain, self.chain_id, self.current_height)
+    }
+
+    pub fn has_fallback(&self) -> bool {
+        usize::from(self.node_index) + 1 < self.nodes.len()
+    }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub struct BlockTask {
+    pub task_id: String,
     pub chain: String,
     pub chain_id: String,
     pub start_height: u64,
@@ -49,11 +64,16 @@ impl BlockTask {
     pub fn new(chain: String, params: &Map<String, Value>) -> BlockTask {
         let nodes = params.get("nodes").unwrap().as_array().unwrap().iter().map(|n| { String::from(n.as_str().unwrap()) }).collect();
         BlockTask {
+            task_id: format!("{}:{}", chain, params.get("chain_id").unwrap().as_str().unwrap()),
             chain,
             chain_id: String::from(params.get("chain_id").unwrap().as_str().unwrap()),
             start_height: params.get("start_height").unwrap().as_u64().unwrap(),
             nodes,
         }
+    }
+
+    pub fn nodes_str(&self) -> String {
+        format!("{:?}", self.nodes)
     }
 }
 
