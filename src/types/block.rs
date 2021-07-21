@@ -1,7 +1,9 @@
+use appbase::ChannelHandle;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 
-use crate::types::block::SubscribeStatus::{Requested, Working};
+use crate::plugin::rocks::RocksPlugin;
+use crate::types::block::SubscribeStatus::Working;
 
 #[derive(Debug, Clone)]
 pub struct SubscribeBlock {
@@ -28,13 +30,14 @@ impl SubscribeBlock {
             curr_height: start_height,
             nodes,
             node_idx: 0,
-            status: SubscribeStatus::Requested,
+            status: SubscribeStatus::Working,
         }
     }
 
     pub fn from(params: &Map<String, Value>) -> SubscribeBlock {
         let start_height = params.get("start_height").unwrap().as_u64().unwrap();
         let nodes = params.get("nodes").unwrap().as_array().unwrap().iter().map(|n| { String::from(n.as_str().unwrap()) }).collect();
+        let task_status = params.get("status").unwrap().as_str().unwrap().to_string();
         SubscribeBlock {
             task_id: String::from(params.get("task_id").unwrap().as_str().unwrap()),
             chain: String::from(params.get("chain").unwrap().as_str().unwrap()),
@@ -43,7 +46,7 @@ impl SubscribeBlock {
             curr_height: start_height,
             nodes,
             node_idx: 0,
-            status: SubscribeStatus::Requested
+            status: BlockTask::sub_status(task_status),
         }
     }
 
@@ -53,19 +56,27 @@ impl SubscribeBlock {
     }
 
     pub fn is_workable(&self) -> bool {
-        vec!(Requested, Working).contains(&self.status)
+        vec!(Working).contains(&self.status)
     }
 
     pub fn block_id(&self) -> String {
         format!("{}:{}:{}", self.chain, self.chain_id, self.curr_height)
     }
 
-    pub fn handle_err(&mut self) {
+    pub fn handle_err(&mut self, rocks_ch: &ChannelHandle, e_msg: String) {
         if usize::from(self.node_idx) + 1 < self.nodes.len() {
             self.node_idx += 1;
         } else {
-            self.status = SubscribeStatus::Error
+            self.err(rocks_ch, e_msg);
         }
+    }
+
+    pub fn err(&mut self, rocks_ch: &ChannelHandle, e_msg: String) {
+        self.status = SubscribeStatus::Error;
+        let task = BlockTask::from(self, e_msg);
+        let task_json = json!(task);
+        let msg = RocksPlugin::gen_msg(String::from("put"), self.task_id.clone(), Some(Value::String(task_json.to_string())));
+        let _ = rocks_ch.lock().unwrap().send(msg);
     }
 }
 
@@ -76,6 +87,8 @@ pub struct BlockTask {
     pub chain_id: String,
     pub start_height: u64,
     pub nodes: Vec<String>,
+    pub status: String,
+    pub err_msg: String,
 }
 
 impl BlockTask {
@@ -87,13 +100,37 @@ impl BlockTask {
             chain_id: String::from(params.get("chain_id").unwrap().as_str().unwrap()),
             start_height: params.get("start_height").unwrap().as_u64().unwrap(),
             nodes,
+            status: String::from("working"),
+            err_msg: String::from(""),
+        }
+    }
+
+    pub fn from(sub_block: &SubscribeBlock, err: String) -> BlockTask {
+        BlockTask {
+            task_id: sub_block.task_id.clone(),
+            chain: sub_block.chain.clone(),
+            chain_id: sub_block.chain_id.clone(),
+            start_height: sub_block.start_height,
+            nodes: sub_block.nodes.clone(),
+            status: match sub_block.status {
+                SubscribeStatus::Working => { String::from("working") }
+                SubscribeStatus::Error => { String::from("error") }
+            },
+            err_msg: err,
+        }
+    }
+
+    fn sub_status(status: String) -> SubscribeStatus {
+        if status == String::from("working") {
+            SubscribeStatus::Working
+        } else {
+            SubscribeStatus::Error
         }
     }
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum SubscribeStatus {
-    Requested,
     Working,
     Error,
 }

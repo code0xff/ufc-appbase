@@ -110,8 +110,10 @@ impl Plugin for TendermintPlugin {
             .for_each(|val| {
                 let task = val.as_object().unwrap();
                 let block = SubscribeBlock::from(task);
-                let mut sub_blocks_lock = sub_blocks.try_lock().unwrap();
-                sub_blocks_lock.insert(block.task_id.clone(), block);
+                if block.is_workable() {
+                    let mut sub_blocks_lock = sub_blocks.try_lock().unwrap();
+                    sub_blocks_lock.insert(block.task_id.clone(), block);
+                }
             });
     }
 
@@ -144,39 +146,51 @@ impl Plugin for TendermintPlugin {
                     if sub_block.is_workable() {
                         let req_url = sub_block.request_url();
                         let res_rst = reqwest::get(req_url).await;
-                        if res_rst.is_err() {
-                            sub_block.handle_err();
-                        } else {
+                        if res_rst.is_ok() {
                             let res = res_rst.unwrap();
-                            if res.status().as_u16() == 404 {
-                                sub_block.handle_err();
+                            let status = res.status().clone();
+                            let body = res
+                                .text()
+                                .await
+                                .unwrap();
+                            let map: Map<String, Value> = serde_json::from_str(body.as_str()).unwrap();
+                            if status.is_success() {
+                                let result = map.get("result").unwrap().as_object().unwrap();
+                                let block = result.get("block").unwrap().as_object().unwrap();
+                                let block_header = block.get("header").unwrap();
+
+                                sub_block.curr_height += 1;
+                                sub_block.status = SubscribeStatus::Working;
+
+                                println!("{:?}", block_header);
+                                // rabbit
+                                // let _ = rabbit_channel.lock().unwrap().send(Value::String(block_header.to_string()));
+
+                                // rocks
+                                let msg = RocksPlugin::gen_msg(String::from("put"), sub_block.block_id(), Some(Value::String(block_header.to_string())));
+                                let _ = rocks_ch.lock().unwrap().send(msg);
                             } else {
-                                let body = res
-                                    .text()
-                                    .await
-                                    .unwrap();
-
-                                let body_map: Map<String, Value> = serde_json::from_str(body.as_str()).unwrap();
-                                if body_map.get("error").is_none() {
-                                    let rst = body_map.get("result").unwrap().as_object().unwrap();
-                                    let block = rst.get("block").unwrap().as_object().unwrap();
-                                    let block_header = block.get("header").unwrap();
-
-                                    sub_block.curr_height += 1;
-                                    sub_block.status = SubscribeStatus::Working;
-
-                                    println!("{:?}", block_header);
-                                    // rabbit
-                                    // let _ = rabbit_channel.lock().unwrap().send(Value::String(block_header.to_string()));
-
-                                    // rocks
-                                    let msg = RocksPlugin::gen_msg(String::from("put"), sub_block.block_id(), Some(Value::String(block_header.to_string())));
-                                    let _ = rocks_ch.lock().unwrap().send(msg);
+                                let err = map.get("error").unwrap().as_object().unwrap();
+                                let err_code = err.get("code").unwrap().as_i64().unwrap();
+                                let err_msg = err.get("data").unwrap().as_str().unwrap().to_string();
+                                println!("{}", err_msg);
+                                if status.is_server_error() {
+                                    if err_code == -32603 {
+                                        println!("waiting for next block...");
+                                    } else {
+                                        sub_block.handle_err(&rocks_ch, err_msg);
+                                    }
+                                } else if status == reqwest::StatusCode::NOT_FOUND {
+                                    sub_block.handle_err(&rocks_ch, err_msg);
                                 } else {
-                                    println!("{:?}", body_map.get("error").unwrap());
+                                    sub_block.err(&rocks_ch, err_msg);
                                 }
                             }
-                        }
+                        } else {
+                            let err_msg = res_rst.unwrap_err().to_string();
+                            println!("{}", err_msg);
+                            sub_block.handle_err(&rocks_ch, err_msg);
+                        };
                     }
                 }
             }
