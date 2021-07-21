@@ -63,20 +63,20 @@ impl SubscribeBlock {
         format!("{}:{}:{}", self.chain, self.chain_id, self.curr_height)
     }
 
-    pub fn handle_err(&mut self, rocks_ch: &ChannelHandle, e_msg: String) {
+    pub fn handle_err(&mut self, rocks_ch: &ChannelHandle, err_msg: String) {
         if usize::from(self.node_idx) + 1 < self.nodes.len() {
             self.node_idx += 1;
         } else {
-            self.err(rocks_ch, e_msg);
+            self.err(rocks_ch, err_msg);
         }
     }
 
-    pub fn err(&mut self, rocks_ch: &ChannelHandle, e_msg: String) {
+    pub fn err(&mut self, rocks_channel: &ChannelHandle, err_msg: String) {
         self.status = SubscribeStatus::Error;
-        let task = BlockTask::from(self, e_msg);
+        let task = BlockTask::from(self, err_msg);
         let task_json = json!(task);
         let msg = RocksPlugin::gen_msg(String::from("put"), self.task_id.clone(), Some(Value::String(task_json.to_string())));
-        let _ = rocks_ch.lock().unwrap().send(msg);
+        let _ = rocks_channel.lock().unwrap().send(msg);
     }
 }
 
@@ -105,7 +105,7 @@ impl BlockTask {
         }
     }
 
-    pub fn from(sub_block: &SubscribeBlock, err: String) -> BlockTask {
+    pub fn from(sub_block: &SubscribeBlock, err_msg: String) -> BlockTask {
         BlockTask {
             task_id: sub_block.task_id.clone(),
             chain: sub_block.chain.clone(),
@@ -116,7 +116,7 @@ impl BlockTask {
                 SubscribeStatus::Working => { String::from("working") }
                 SubscribeStatus::Error => { String::from("error") }
             },
-            err_msg: err,
+            err_msg,
         }
     }
 
