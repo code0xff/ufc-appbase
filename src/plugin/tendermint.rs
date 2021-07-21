@@ -145,9 +145,9 @@ impl Plugin for TendermintPlugin {
                 for (_, sub_block) in sub_blocks_lock.iter_mut() {
                     if sub_block.is_workable() {
                         let req_url = sub_block.request_url();
-                        let res_rst = reqwest::get(req_url).await;
-                        if res_rst.is_ok() {
-                            let res = res_rst.unwrap();
+                        let res_result = reqwest::get(req_url).await;
+                        if res_result.is_ok() {
+                            let res = res_result.unwrap();
                             let status = res.status().clone();
                             let body = res
                                 .text()
@@ -187,7 +187,7 @@ impl Plugin for TendermintPlugin {
                                 }
                             }
                         } else {
-                            let err_msg = res_rst.unwrap_err().to_string();
+                            let err_msg = res_result.unwrap_err().to_string();
                             println!("{}", err_msg);
                             sub_block.handle_err(&rocks_ch, err_msg);
                         };

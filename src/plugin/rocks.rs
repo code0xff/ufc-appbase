@@ -39,13 +39,13 @@ impl RocksPlugin {
         let db_lock = db.lock().unwrap();
         let mut iter = db_lock.raw_iterator();
         iter.seek(prefix.as_bytes());
-        let mut rst: Vec<Value> = vec![];
+        let mut result: Vec<Value> = vec![];
         while iter.valid() && String::from_utf8(iter.key().unwrap().to_vec()).unwrap().starts_with("task") {
             let value: Map<String, Value> = serde_from_str(String::from_utf8(iter.value().unwrap().to_vec()).unwrap().as_str()).unwrap();
-            rst.push(Value::Object(value));
+            result.push(Value::Object(value));
             iter.next();
         }
-        Value::Array(rst)
+        Value::Array(result)
     }
 }
 
