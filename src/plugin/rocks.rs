@@ -40,7 +40,7 @@ impl RocksPlugin {
         let mut iter = db_lock.raw_iterator();
         iter.seek(prefix.as_bytes());
         let mut result: Vec<Value> = vec![];
-        while iter.valid() && String::from_utf8(iter.key().unwrap().to_vec()).unwrap().starts_with("task") {
+        while iter.valid() && String::from_utf8(iter.key().unwrap().to_vec()).unwrap().starts_with(prefix) {
             let value: Map<String, Value> = serde_from_str(String::from_utf8(iter.value().unwrap().to_vec()).unwrap().as_str()).unwrap();
             result.push(Value::Object(value));
             iter.next();
