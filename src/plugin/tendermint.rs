@@ -7,6 +7,7 @@ use appbase::*;
 use futures::lock::Mutex as FutureMutex;
 use jsonrpc_core::*;
 use serde_json::{json, Map, Value};
+use serde::{Serialize, Deserialize};
 
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::plugin::rocks::{RocksPlugin, RocksMethod, RocksMsg};
@@ -22,12 +23,43 @@ pub struct TendermintPlugin {
 
 type SubscribeBlocks = Arc<FutureMutex<HashMap<String, SubscribeBlock>>>;
 
-impl TendermintPlugin {
-    pub fn gen_msg(method: String, val: Value) -> Value {
-        let mut msg = Map::new();
-        msg.insert(String::from("method"), Value::String(method));
-        msg.insert(String::from("params"), val);
-        Value::Object(msg)
+#[derive(Serialize, Deserialize)]
+pub struct TendermintMsg {
+    method: String,
+    value: Value,
+}
+
+impl TendermintMsg {
+    pub fn new(method: TendermintMethod, value: Value) -> Value {
+        let msg = TendermintMsg {
+            method: method.value(),
+            value,
+        };
+        json!(msg)
+    }
+}
+
+pub enum TendermintMethod {
+    SubscribeBlock,
+    UnsubscribeBlock,
+}
+
+impl TendermintMethod {
+    fn value(&self) -> String {
+        match self {
+            TendermintMethod::SubscribeBlock => String::from("subscribe_block"),
+            TendermintMethod::UnsubscribeBlock => String::from("unsubscribe_block"),
+        }
+    }
+
+    fn find(method: &str) -> TendermintMethod {
+        match method {
+            "subscribe_block" => TendermintMethod::SubscribeBlock,
+            "unsubscribe_block" => TendermintMethod::UnsubscribeBlock,
+            _ => {
+                panic!("matched method does not exist");
+            }
+        }
     }
 }
 
@@ -68,7 +100,7 @@ impl Plugin for TendermintPlugin {
             if verified.is_err() {
                 return Box::new(futures::future::ready(Ok(Value::String(verified.unwrap_err()))));
             }
-            let message = Self::gen_msg(String::from("subscribe_block"), Value::Object(params.clone()));
+            let message = TendermintMsg::new(TendermintMethod::SubscribeBlock, Value::Object(params.clone()));
             let _ = tm_channel.lock().unwrap().send(message);
 
             let new_block_task = BlockTask::new(String::from("tendermint"), &params);
@@ -89,7 +121,7 @@ impl Plugin for TendermintPlugin {
                 return Box::new(futures::future::ready(Ok(Value::String(verified.unwrap_err()))));
             }
 
-            let tm_msg = Self::gen_msg(String::from("unsubscribe_block"), Value::Object(params.clone()));
+            let tm_msg = TendermintMsg::new(TendermintMethod::UnsubscribeBlock, Value::Object(params.clone()));
             let _ = tm_channel.lock().unwrap().send(tm_msg);
 
             let task_id = params.get("task_id").unwrap().as_str().unwrap().to_string();
@@ -130,15 +162,18 @@ impl Plugin for TendermintPlugin {
                 let mut sub_blocks_lock = sub_blocks.lock().await;
                 if let Ok(message) = mon_lock.try_recv() {
                     let map = message.as_object().unwrap();
-                    let method = String::from(map.get("method").unwrap().as_str().unwrap());
-                    let params = map.get("params").unwrap().as_object().unwrap();
-                    if method == String::from("subscribe_block") {
-                        let new_sub_block = SubscribeBlock::new(String::from("tendermint"), &params);
-                        sub_blocks_lock.insert(new_sub_block.task_id.clone(), new_sub_block);
-                    } else if method == String::from("unsubscribe_block") {
-                        let chain = String::from(params.get("task_id").unwrap().as_str().unwrap());
-                        sub_blocks_lock.remove(&chain);
-                    }
+                    let method = TendermintMethod::find(map.get("method").unwrap().as_str().unwrap());
+                    let params = map.get("value").unwrap().as_object().unwrap();
+                    match method {
+                        TendermintMethod::SubscribeBlock => {
+                            let new_sub_block = SubscribeBlock::new(String::from("tendermint"), &params);
+                            sub_blocks_lock.insert(new_sub_block.task_id.clone(), new_sub_block);
+                        }
+                        TendermintMethod::UnsubscribeBlock => {
+                            let chain = String::from(params.get("task_id").unwrap().as_str().unwrap());
+                            sub_blocks_lock.remove(&chain);
+                        }
+                    };
                 }
 
                 for (_, sub_block) in sub_blocks_lock.iter_mut() {
