@@ -6,19 +6,39 @@ use std::time::Duration;
 use appbase::*;
 use futures::lock::Mutex as FutureMutex;
 use jsonrpc_core::*;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use serde::{Serialize, Deserialize};
 
 use crate::plugin::jsonrpc::JsonRpcPlugin;
-use crate::plugin::rocks::{RocksPlugin, RocksMethod, RocksMsg};
+use crate::plugin::rocks::{RocksMethod, RocksMsg, RocksPlugin};
 use crate::types::block::{BlockTask, SubscribeBlock, SubscribeStatus};
 use crate::validation::{subscribe, unsubscribe};
 
 pub struct TendermintPlugin {
     base: PluginBase,
     sub_blocks: Option<SubscribeBlocks>,
-    channels: Option<HashMap<String, ChannelHandle>>,
+    channels: Option<MultiChannel>,
     monitor: Option<SubscribeHandle>,
+}
+
+struct MultiChannel {
+    channel_map: HashMap<String, ChannelHandle>,
+}
+
+impl MultiChannel {
+    fn new() -> MultiChannel {
+        MultiChannel {
+            channel_map: HashMap::new(),
+        }
+    }
+
+    fn add(&mut self, name: &str) {
+        self.channel_map.insert(String::from(name), app::get_channel(String::from(name)));
+    }
+
+    fn get(&self, name: &str) -> ChannelHandle {
+        Arc::clone(self.channel_map.get(name).unwrap())
+    }
 }
 
 type SubscribeBlocks = Arc<FutureMutex<HashMap<String, SubscribeBlock>>>;
@@ -82,9 +102,9 @@ impl Plugin for TendermintPlugin {
             return;
         }
         self.sub_blocks = Some(Arc::new(FutureMutex::new(HashMap::new())));
-        let mut channels: HashMap<String, ChannelHandle> = HashMap::new();
-        channels.insert(String::from("tendermint"), app::get_channel(String::from("tendermint")));
-        channels.insert(String::from("rocks"), app::get_channel(String::from("rocks")));
+        let mut channels = MultiChannel::new();
+        channels.add("tendermint");
+        channels.add("rocks");
         self.channels = Some(channels.to_owned());
         self.monitor = Some(app::subscribe_channel(String::from("tendermint")));
 
@@ -92,8 +112,8 @@ impl Plugin for TendermintPlugin {
         let mut jsonrpc_plugin = jsonrpc_plugin_handle.lock().unwrap();
         let jsonrpc = jsonrpc_plugin.downcast_mut::<JsonRpcPlugin>().unwrap();
 
-        let rocks_channel = Arc::clone(self.channels.as_ref().unwrap().get("rocks").unwrap());
-        let tm_channel = Arc::clone(self.channels.as_ref().unwrap().get("tendermint").unwrap());
+        let rocks_channel = self.channels.as_ref().unwrap().get("rocks");
+        let tm_channel = self.channels.as_ref().unwrap().get("tendermint");
         jsonrpc.add_method(String::from("tm_subscribe_block"), move |params: Params| {
             let params: Map<String, Value> = params.parse().unwrap();
             let verified = subscribe::verify(&params);
@@ -112,8 +132,8 @@ impl Plugin for TendermintPlugin {
             Box::new(futures::future::ready(Ok(Value::String(format!("subscription requested! task_id={}", task_id)))))
         });
 
-        let rocks_channel = Arc::clone(self.channels.as_ref().unwrap().get("rocks").unwrap());
-        let tm_channel = Arc::clone(self.channels.as_ref().unwrap().get("tendermint").unwrap());
+        let rocks_channel = self.channels.as_ref().unwrap().get("rocks");
+        let tm_channel = self.channels.as_ref().unwrap().get("tendermint");
         jsonrpc.add_method(String::from("tm_unsubscribe_block"), move |params: Params| {
             let params: Map<String, Value> = params.parse().unwrap();
             let verified = unsubscribe::verify(&params);
@@ -154,7 +174,7 @@ impl Plugin for TendermintPlugin {
         }
         let monitor = Arc::clone(self.monitor.as_ref().unwrap());
         let sub_blocks = Arc::clone(self.sub_blocks.as_ref().unwrap());
-        let rocks_ch = Arc::clone(self.channels.as_ref().unwrap().get("rocks").unwrap());
+        let rocks_channel = self.channels.as_ref().unwrap().get("rocks");
         tokio::spawn(async move {
             let mut mon_lock = monitor.lock().await;
             loop {
@@ -170,8 +190,8 @@ impl Plugin for TendermintPlugin {
                             sub_blocks_lock.insert(new_sub_block.task_id.clone(), new_sub_block);
                         }
                         TendermintMethod::UnsubscribeBlock => {
-                            let chain = String::from(params.get("task_id").unwrap().as_str().unwrap());
-                            sub_blocks_lock.remove(&chain);
+                            let task_id = String::from(params.get("task_id").unwrap().as_str().unwrap());
+                            sub_blocks_lock.remove(&task_id);
                         }
                     };
                 }
@@ -202,7 +222,7 @@ impl Plugin for TendermintPlugin {
 
                                 // rocks
                                 let msg = RocksMsg::new(RocksMethod::Put, sub_block.block_id(), Some(Value::String(block_header.to_string())));
-                                let _ = rocks_ch.lock().unwrap().send(msg);
+                                let _ = rocks_channel.lock().unwrap().send(msg);
                             } else {
                                 let err = map.get("error").unwrap().as_object().unwrap();
                                 let err_code = err.get("code").unwrap().as_i64().unwrap();
@@ -212,18 +232,18 @@ impl Plugin for TendermintPlugin {
                                     if err_code == -32603 {
                                         println!("waiting for next block...");
                                     } else {
-                                        sub_block.handle_err(&rocks_ch, err_msg);
+                                        sub_block.handle_err(&rocks_channel, err_msg);
                                     }
                                 } else if status == reqwest::StatusCode::NOT_FOUND {
-                                    sub_block.handle_err(&rocks_ch, err_msg);
+                                    sub_block.handle_err(&rocks_channel, err_msg);
                                 } else {
-                                    sub_block.err(&rocks_ch, err_msg);
+                                    sub_block.err(&rocks_channel, err_msg);
                                 }
                             }
                         } else {
                             let err_msg = res_result.unwrap_err().to_string();
                             println!("{}", err_msg);
-                            sub_block.handle_err(&rocks_ch, err_msg);
+                            sub_block.handle_err(&rocks_channel, err_msg);
                         };
                     }
                 }

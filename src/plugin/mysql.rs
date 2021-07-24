@@ -12,18 +12,54 @@ pub struct MySqlPlugin {
     monitor: Option<SubscribeHandle>,
 }
 
-appbase_plugin_requires!(MySqlPlugin; JsonRpcPlugin);
-
 type MySqlPool = Arc<Mutex<Pool>>;
 
-impl MySqlPlugin {
-    pub fn gen_msg(method: String, value: Value) -> Value {
-        let mut message = Map::new();
-        message.insert(String::from("method"), Value::String(method));
-        message.insert(String::from("value"), value);
-        Value::Object(message)
+#[derive(Serialize, Deserialize)]
+pub struct MySqlMsg {
+    method: String,
+    id: Option<Value>,
+    value: Option<Value>,
+}
+
+impl MySqlMsg {
+    pub fn new(method: MySqlMethod, id: Option<Value>, value: Option<Value>) -> Value {
+        let msg = MySqlMsg {
+            method: method.value(),
+            id,
+            value,
+        };
+        json!(msg)
     }
 }
+
+pub enum MySqlMethod {
+    Insert,
+    Update,
+    Delete,
+}
+
+impl MySqlMethod {
+    fn value(&self) -> String {
+        match self {
+            MySqlMethod::Insert => String::from("insert"),
+            MySqlMethod::Update => String::from("update"),
+            MySqlMethod::Delete => String::from("delete"),
+        }
+    }
+
+    fn find(method: &str) -> MySqlMethod {
+        match method {
+            "insert" => MySqlMethod::Insert,
+            "update" => MySqlMethod::Update,
+            "delete" => MySqlMethod::Delete,
+            _ => {
+                panic!("matched method does not exist");
+            }
+        }
+    }
+}
+
+appbase_plugin_requires!(MySqlPlugin; JsonRpcPlugin);
 
 impl Plugin for MySqlPlugin {
     appbase_plugin_default!(MySqlPlugin);

@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use appbase::*;
 use jsonrpc_core::{Params, serde_from_str};
 use rocksdb::{DB, DBWithThreadMode, SingleThreaded};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use serde::{Serialize, Deserialize};
 
 use crate::libs::serialize;
 use crate::plugin::jsonrpc::JsonRpcPlugin;
@@ -112,7 +112,15 @@ impl Plugin for RocksPlugin {
             if verified.is_err() {
                 return Box::new(futures::future::ready(Ok(Value::String(verified.unwrap_err()))));
             }
-            let tasks = Self::find_by_prefix_static(&db, "task");
+            let prefix = match params.get("task_id") {
+                None => {
+                    "task"
+                }
+                Some(task_id) => {
+                    task_id
+                }
+            };
+            let tasks = Self::find_by_prefix_static(&db, prefix);
             Box::new(futures::future::ready(Ok(tasks)))
         });
     }
