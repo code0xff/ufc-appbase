@@ -5,6 +5,7 @@ use crate::plugin::tendermint::TendermintPlugin;
 mod plugin;
 mod types;
 mod validation;
+mod libs;
 
 #[tokio::main]
 async fn main() {

@@ -2,7 +2,7 @@ use appbase::ChannelHandle;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use crate::plugin::rocks::RocksPlugin;
+use crate::plugin::rocks::{RocksMethod, RocksMsg};
 use crate::types::block::SubscribeStatus::Working;
 
 #[derive(Debug, Clone)]
@@ -75,7 +75,7 @@ impl SubscribeBlock {
         self.status = SubscribeStatus::Error;
         let task = BlockTask::from(self, err_msg);
         let task_json = json!(task);
-        let msg = RocksPlugin::gen_msg(String::from("put"), self.task_id.clone(), Some(Value::String(task_json.to_string())));
+        let msg = RocksMsg::new(RocksMethod::Put, self.task_id.clone(), Some(Value::String(task_json.to_string())));
         let _ = rocks_channel.lock().unwrap().send(msg);
     }
 }

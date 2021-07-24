@@ -9,8 +9,7 @@ use jsonrpc_core::*;
 use serde_json::{json, Map, Value};
 
 use crate::plugin::jsonrpc::JsonRpcPlugin;
-use crate::plugin::rabbit::RabbitPlugin;
-use crate::plugin::rocks::RocksPlugin;
+use crate::plugin::rocks::{RocksPlugin, RocksMethod, RocksMsg};
 use crate::types::block::{BlockTask, SubscribeBlock, SubscribeStatus};
 use crate::validation::{subscribe, unsubscribe};
 
@@ -32,7 +31,7 @@ impl TendermintPlugin {
     }
 }
 
-appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, RabbitPlugin, RocksPlugin);
+appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, RocksPlugin);
 
 impl Plugin for TendermintPlugin {
     appbase_plugin_default!(TendermintPlugin);
@@ -75,7 +74,7 @@ impl Plugin for TendermintPlugin {
             let new_block_task = BlockTask::new(String::from("tendermint"), &params);
             let task_id = new_block_task.task_id.clone();
             let value = json!(new_block_task);
-            let message = RocksPlugin::gen_msg(String::from("put"), task_id.clone(), Some(Value::String(value.to_string())));
+            let message = RocksMsg::new(RocksMethod::Put, task_id.clone(), Some(Value::String(value.to_string())));
             let _ = rocks_channel.lock().unwrap().send(message);
 
             Box::new(futures::future::ready(Ok(Value::String(format!("subscription requested! task_id={}", task_id)))))
@@ -94,7 +93,7 @@ impl Plugin for TendermintPlugin {
             let _ = tm_channel.lock().unwrap().send(tm_msg);
 
             let task_id = params.get("task_id").unwrap().as_str().unwrap().to_string();
-            let rocks_msg = RocksPlugin::gen_msg(String::from("delete"), task_id.clone(), None);
+            let rocks_msg = RocksMsg::new(RocksMethod::Delete, task_id.clone(), None);
             let _ = rocks_channel.lock().unwrap().send(rocks_msg);
 
             let task_id = params.get("task_id").unwrap().as_str().unwrap();
@@ -167,7 +166,7 @@ impl Plugin for TendermintPlugin {
                                 // let _ = rabbit_channel.lock().unwrap().send(Value::String(block_header.to_string()));
 
                                 // rocks
-                                let msg = RocksPlugin::gen_msg(String::from("put"), sub_block.block_id(), Some(Value::String(block_header.to_string())));
+                                let msg = RocksMsg::new(RocksMethod::Put, sub_block.block_id(), Some(Value::String(block_header.to_string())));
                                 let _ = rocks_ch.lock().unwrap().send(msg);
                             } else {
                                 let err = map.get("error").unwrap().as_object().unwrap();
