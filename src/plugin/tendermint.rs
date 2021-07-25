@@ -21,6 +21,7 @@ pub struct TendermintPlugin {
     monitor: Option<SubscribeHandle>,
 }
 
+#[derive(Clone)]
 struct MultiChannel {
     channel_map: HashMap<String, ChannelHandle>,
 }

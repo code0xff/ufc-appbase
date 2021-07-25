@@ -117,7 +117,7 @@ impl Plugin for RocksPlugin {
                     "task"
                 }
                 Some(task_id) => {
-                    task_id
+                    task_id.as_str().unwrap()
                 }
             };
             let tasks = Self::find_by_prefix_static(&db, prefix);

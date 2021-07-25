@@ -2,7 +2,8 @@ use std::sync::{Arc, Mutex};
 
 use appbase::*;
 use mysql::*;
-use serde_json::{Map, Value};
+use serde_json::{Value, json};
+use serde::{Serialize, Deserialize};
 
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 
