@@ -12,7 +12,7 @@ use serde_json::{json, Map, Value};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::plugin::rocks::{RocksMethod, RocksMsg, RocksPlugin};
 use crate::types::block::{BlockTask, SubscribeBlock, SubscribeStatus};
-use crate::validation::{subscribe, unsubscribe};
+use crate::validation::{subscribe, unsubscribe, get_block};
 
 pub struct TendermintPlugin {
     base: PluginBase,
@@ -228,7 +228,6 @@ impl Plugin for TendermintPlugin {
                                 let err = map.get("error").unwrap().as_object().unwrap();
                                 let err_code = err.get("code").unwrap().as_i64().unwrap();
                                 let err_msg = err.get("data").unwrap().as_str().unwrap().to_string();
-                                println!("{}", err_msg);
                                 if status.is_server_error() {
                                     if err_code == -32603 {
                                         println!("waiting for next block...");
@@ -243,7 +242,6 @@ impl Plugin for TendermintPlugin {
                             }
                         } else {
                             let err_msg = res_result.unwrap_err().to_string();
-                            println!("{}", err_msg);
                             sub_block.handle_err(&rocks_channel, err_msg);
                         };
                     }

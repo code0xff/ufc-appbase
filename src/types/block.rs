@@ -64,6 +64,7 @@ impl SubscribeBlock {
     }
 
     pub fn handle_err(&mut self, rocks_ch: &ChannelHandle, err_msg: String) {
+        println!("{}", err_msg);
         if usize::from(self.node_idx) + 1 < self.nodes.len() {
             self.node_idx += 1;
         } else {
@@ -72,6 +73,7 @@ impl SubscribeBlock {
     }
 
     pub fn err(&mut self, rocks_channel: &ChannelHandle, err_msg: String) {
+        println!("{}", err_msg);
         self.status = SubscribeStatus::Error;
         let task = BlockTask::from(self, err_msg);
         let task_json = json!(task);
@@ -100,7 +102,7 @@ impl BlockTask {
             chain_id: String::from(params.get("chain_id").unwrap().as_str().unwrap()),
             start_height: params.get("start_height").unwrap().as_u64().unwrap(),
             nodes,
-            status: String::from("working"),
+            status: SubscribeStatus::Working.value(),
             err_msg: String::from(""),
         }
     }
@@ -112,19 +114,8 @@ impl BlockTask {
             chain_id: sub_block.chain_id.clone(),
             start_height: sub_block.start_height,
             nodes: sub_block.nodes.clone(),
-            status: match sub_block.status {
-                SubscribeStatus::Working => { String::from("working") }
-                SubscribeStatus::Error => { String::from("error") }
-            },
+            status: sub_block.status.value(),
             err_msg,
-        }
-    }
-
-    fn sub_status(status: String) -> SubscribeStatus {
-        if status == String::from("working") {
-            SubscribeStatus::Working
-        } else {
-            SubscribeStatus::Error
         }
     }
 }
@@ -133,4 +124,23 @@ impl BlockTask {
 pub enum SubscribeStatus {
     Working,
     Error,
+}
+
+impl SubscribeStatus {
+    fn value(&self) -> String {
+        match self {
+            SubscribeStatus::Working => String::from("working"),
+            SubscribeStatus::Error => String::from("error"),
+        }
+    }
+
+    fn find(method: &str) -> SubscribeStatus {
+        match method {
+            "working" => SubscribeStatus::Working,
+            "error" => SubscribeStatus::Error,
+            _ => {
+                panic!("matched status does not exist");
+            }
+        }
+    }
 }

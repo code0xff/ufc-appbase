@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use appbase::*;
 use jsonrpc_core::{Params, serde_from_str};
-use rocksdb::{DB, DBWithThreadMode, SingleThreaded};
+use rocksdb::{DB, DBWithThreadMode, SingleThreaded, Error};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
@@ -78,6 +78,20 @@ impl RocksPlugin {
         }
         Value::Array(result)
     }
+
+    pub fn find_by_key(&self, key: &str) -> Option<String> {
+        let db = Arc::clone(self.db.as_ref().unwrap());
+        let db_lock = db.lock().unwrap();
+        let result = db_lock.get(key.as_bytes()).unwrap();
+        match result {
+            None => {
+                None
+            }
+            Some(value) => {
+                String::from_utf8(value)
+            }
+        }
+    }
 }
 
 appbase_plugin_requires!(RocksPlugin; );
@@ -107,6 +121,26 @@ impl Plugin for RocksPlugin {
 
         let db = Arc::clone(self.db.as_ref().unwrap());
         jsonrpc.add_method(String::from("get_tasks"), move |params: Params| {
+            let params: Map<String, Value> = params.parse().unwrap();
+            let verified = get_task::verify(&params);
+            if verified.is_err() {
+                return Box::new(futures::future::ready(Ok(Value::String(verified.unwrap_err()))));
+            }
+            let prefix = match params.get("task_id") {
+                None => {
+                    "task"
+                }
+                Some(task_id) => {
+                    task_id.as_str().unwrap()
+                }
+            };
+            let tasks = Self::find_by_prefix_static(&db, prefix);
+            Box::new(futures::future::ready(Ok(tasks)))
+        });
+
+
+        let db = Arc::clone(self.db.as_ref().unwrap());
+        jsonrpc.add_method(String::from("find_by_key"), move |params: Params| {
             let params: Map<String, Value> = params.parse().unwrap();
             let verified = get_task::verify(&params);
             if verified.is_err() {
