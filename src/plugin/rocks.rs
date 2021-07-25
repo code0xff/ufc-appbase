@@ -3,8 +3,10 @@ use std::sync::{Arc, Mutex};
 use appbase::*;
 use jsonrpc_core::{Params, serde_from_str};
 use rocksdb::{DB, DBWithThreadMode, SingleThreaded};
-use serde_json::{Map, Value};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Map, Value};
 
+use crate::libs::serialize;
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::validation::get_task;
 
@@ -14,22 +16,51 @@ pub struct RocksPlugin {
     monitor: Option<SubscribeHandle>,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct RocksMsg {
+    method: String,
+    key: String,
+    value: Option<Value>,
+}
+
+impl RocksMsg {
+    pub fn new(method: RocksMethod, key: String, value: Option<Value>) -> Value {
+        let msg = RocksMsg {
+            method: method.value(),
+            key,
+            value,
+        };
+        json!(msg)
+    }
+}
+
+pub enum RocksMethod {
+    Put,
+    Delete,
+}
+
+impl RocksMethod {
+    fn value(&self) -> String {
+        match self {
+            RocksMethod::Put => String::from("put"),
+            RocksMethod::Delete => String::from("delete"),
+        }
+    }
+
+    fn find(method: &str) -> RocksMethod {
+        match method {
+            "put" => RocksMethod::Put,
+            "delete" => RocksMethod::Delete,
+            _ => {
+                panic!("matched method does not exist");
+            }
+        }
+    }
+}
+
 type RocksDB = Arc<Mutex<DBWithThreadMode<SingleThreaded>>>;
 
 impl RocksPlugin {
-    pub fn gen_msg(method: String, key: String, value: Option<Value>) -> Value {
-        let mut msg = Map::new();
-        msg.insert(String::from("method"), Value::String(method));
-        msg.insert(String::from("key"), Value::String(key));
-        match value {
-            None => {}
-            Some(v) => {
-                msg.insert(String::from("value"), v);
-            }
-        }
-        Value::Object(msg)
-    }
-
     pub fn find_by_prefix(&self, prefix: &str) -> Value {
         let db = Arc::clone(self.db.as_ref().unwrap());
         Self::find_by_prefix_static(&db, prefix)
@@ -39,9 +70,9 @@ impl RocksPlugin {
         let db_lock = db.lock().unwrap();
         let mut iter = db_lock.raw_iterator();
         iter.seek(prefix.as_bytes());
-        let mut result: Vec<Value> = vec![];
-        while iter.valid() && String::from_utf8(iter.key().unwrap().to_vec()).unwrap().starts_with(prefix) {
-            let value: Map<String, Value> = serde_from_str(String::from_utf8(iter.value().unwrap().to_vec()).unwrap().as_str()).unwrap();
+        let mut result: Vec<Value> = Vec::new();
+        while iter.valid() && serialize::deserialize(iter.key().unwrap()).starts_with(prefix) {
+            let value: Map<String, Value> = serde_from_str(serialize::deserialize(iter.value().unwrap()).as_str()).unwrap();
             result.push(Value::Object(value));
             iter.next();
         }
@@ -81,7 +112,15 @@ impl Plugin for RocksPlugin {
             if verified.is_err() {
                 return Box::new(futures::future::ready(Ok(Value::String(verified.unwrap_err()))));
             }
-            let tasks = Self::find_by_prefix_static(&db, "task");
+            let prefix = match params.get("task_id") {
+                None => {
+                    "task"
+                }
+                Some(task_id) => {
+                    task_id.as_str().unwrap()
+                }
+            };
+            let tasks = Self::find_by_prefix_static(&db, prefix);
             Box::new(futures::future::ready(Ok(tasks)))
         });
     }
@@ -98,14 +137,17 @@ impl Plugin for RocksPlugin {
                 let db_lock = db.lock().unwrap();
                 if let Ok(msg) = mon_lock.try_recv() {
                     let data = msg.as_object().unwrap();
-                    let method = String::from(data.get("method").unwrap().as_str().unwrap());
-                    if method == String::from("put") {
-                        let key = data.get("key").unwrap().as_str().unwrap();
-                        let val = data.get("value").unwrap().as_str().unwrap();
-                        let _ = db_lock.put(key.as_bytes(), val.as_bytes());
-                    } else if method == String::from("delete") {
-                        let key = data.get("key").unwrap().as_str().unwrap();
-                        let _ = db_lock.delete(key.as_bytes());
+                    let method = RocksMethod::find(data.get("method").unwrap().as_str().unwrap());
+                    match method {
+                        RocksMethod::Put => {
+                            let key = data.get("key").unwrap().as_str().unwrap();
+                            let val = data.get("value").unwrap().as_str().unwrap();
+                            let _ = db_lock.put(key.as_bytes(), val.as_bytes());
+                        }
+                        RocksMethod::Delete => {
+                            let key = data.get("key").unwrap().as_str().unwrap();
+                            let _ = db_lock.delete(key.as_bytes());
+                        }
                     }
                 }
             }
