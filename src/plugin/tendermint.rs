@@ -15,6 +15,7 @@ use crate::types::channel::MultiChannel;
 use crate::types::jsonrpc::JsonRpcRequest;
 use crate::types::subscribe::{SubscribeEvent, SubscribeTarget, SubscribeTask};
 use crate::validation::{subscribe, unsubscribe};
+use crate::types::enumeration::Enumeration;
 
 pub struct TendermintPlugin {
     base: PluginBase,
@@ -107,7 +108,7 @@ pub enum TendermintMethod {
     Unsubscribe,
 }
 
-impl TendermintMethod {
+impl Enumeration for TendermintMethod {
     fn value(&self) -> String {
         match self {
             TendermintMethod::Subscribe => String::from("subscribe"),
@@ -115,13 +116,11 @@ impl TendermintMethod {
         }
     }
 
-    fn find(method: &str) -> Option<TendermintMethod> {
+    fn find(method: &str) -> Option<Self> {
         match method {
             "subscribe" => Some(TendermintMethod::Subscribe),
             "unsubscribe" => Some(TendermintMethod::Unsubscribe),
-            _ => {
-                None
-            }
+            _ => None
         }
     }
 }

@@ -4,6 +4,7 @@ use serde_json::{json, Map, Value};
 
 use crate::plugin::rocks::{RocksMethod, RocksMsg};
 use crate::types::subscribe::SubscribeStatus::Working;
+use crate::types::enumeration::Enumeration;
 
 #[derive(Debug, Clone)]
 pub struct SubscribeEvent {
@@ -129,24 +130,24 @@ pub enum SubscribeTarget {
     Tx,
 }
 
-impl SubscribeTarget {
-    pub fn value(&self) -> String {
+impl Enumeration for SubscribeTarget {
+    fn value(&self) -> String {
         match self {
             SubscribeTarget::Block => String::from("block"),
             SubscribeTarget::Tx => String::from("tx"),
         }
     }
 
-    pub fn find(target: &str) -> Option<SubscribeTarget> {
+    fn find(target: &str) -> Option<Self> {
         match target {
             "block" => Some(SubscribeTarget::Block),
             "tx" => Some(SubscribeTarget::Tx),
-            _ => {
-                None
-            }
+            _ => None,
         }
     }
+}
 
+impl SubscribeTarget {
     pub fn valid(target: &str) -> bool {
         Self::find(target).is_some()
     }
@@ -158,21 +159,19 @@ pub enum SubscribeStatus {
     Error,
 }
 
-impl SubscribeStatus {
-    pub fn value(&self) -> String {
+impl Enumeration for SubscribeStatus {
+    fn value(&self) -> String {
         match self {
             SubscribeStatus::Working => String::from("working"),
             SubscribeStatus::Error => String::from("error"),
         }
     }
 
-    pub fn find(status: &str) -> Option<SubscribeStatus> {
-        match status {
+    fn find(name: &str) -> Option<Self> {
+        match name {
             "working" => Some(SubscribeStatus::Working),
             "error" => Some(SubscribeStatus::Error),
-            _ => {
-                None
-            }
+            _ => None,
         }
     }
 }

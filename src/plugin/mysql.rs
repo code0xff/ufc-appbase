@@ -2,10 +2,11 @@ use std::sync::{Arc, Mutex};
 
 use appbase::*;
 use mysql::*;
-use serde_json::{Value, json};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 
 use crate::plugin::jsonrpc::JsonRpcPlugin;
+use crate::types::enumeration::Enumeration;
 
 pub struct MySqlPlugin {
     base: PluginBase,
@@ -39,7 +40,7 @@ pub enum MySqlMethod {
     Delete,
 }
 
-impl MySqlMethod {
+impl Enumeration for MySqlMethod {
     fn value(&self) -> String {
         match self {
             MySqlMethod::Insert => String::from("insert"),
@@ -48,14 +49,12 @@ impl MySqlMethod {
         }
     }
 
-    fn find(method: &str) -> Option<MySqlMethod> {
-        match method {
+    fn find(name: &str) -> Option<Self> {
+        match name {
             "insert" => Some(MySqlMethod::Insert),
             "update" => Some(MySqlMethod::Update),
             "delete" => Some(MySqlMethod::Delete),
-            _ => {
-                None
-            }
+            _ => None,
         }
     }
 }
