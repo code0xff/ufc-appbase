@@ -1,9 +1,14 @@
 use serde_json::{Map, Value};
+use crate::types::subscribe::SubscribeTarget;
 
 pub fn verify(params: &Map<String, Value>) -> Result<String, String> {
-    let chain_id = params.get("chain_id");
-    if chain_id.is_none() || !chain_id.unwrap().is_string() {
-        return Err(String::from("invalid chain_id value"));
+    let target = params.get("target");
+    if target.is_none() || !target.unwrap().is_string() || !SubscribeTarget::valid(target.unwrap().as_str().unwrap()) {
+        return Err(String::from("invalid target value"));
+    }
+    let sub_id = params.get("sub_id");
+    if sub_id.is_none() || !sub_id.unwrap().is_string() {
+        return Err(String::from("invalid sub_id value"));
     }
     let start_height = params.get("start_height");
     if start_height.is_none() || !start_height.unwrap().is_number() {
