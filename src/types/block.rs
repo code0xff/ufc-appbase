@@ -35,18 +35,17 @@ impl SubscribeBlock {
     }
 
     pub fn from(params: &Map<String, Value>) -> SubscribeBlock {
-        let start_height = params.get("start_height").unwrap().as_u64().unwrap();
         let nodes = params.get("nodes").unwrap().as_array().unwrap().iter().map(|n| { String::from(n.as_str().unwrap()) }).collect();
-        let task_status = params.get("status").unwrap().as_str().unwrap().to_string();
+        let task_status = params.get("status").unwrap().as_str().unwrap();
         SubscribeBlock {
             task_id: String::from(params.get("task_id").unwrap().as_str().unwrap()),
             chain: String::from(params.get("chain").unwrap().as_str().unwrap()),
             chain_id: String::from(params.get("chain_id").unwrap().as_str().unwrap()),
-            start_height,
-            curr_height: start_height,
+            start_height: params.get("start_height").unwrap().as_u64().unwrap(),
+            curr_height: params.get("curr_height").unwrap().as_u64().unwrap(),
             nodes,
             node_idx: 0,
-            status: BlockTask::sub_status(task_status),
+            status: SubscribeStatus::find(task_status),
         }
     }
 
@@ -64,6 +63,7 @@ impl SubscribeBlock {
     }
 
     pub fn handle_err(&mut self, rocks_ch: &ChannelHandle, err_msg: String) {
+        println!("{}", err_msg);
         if usize::from(self.node_idx) + 1 < self.nodes.len() {
             self.node_idx += 1;
         } else {
@@ -72,8 +72,9 @@ impl SubscribeBlock {
     }
 
     pub fn err(&mut self, rocks_channel: &ChannelHandle, err_msg: String) {
+        println!("{}", err_msg);
         self.status = SubscribeStatus::Error;
-        let task = BlockTask::from(self, err_msg);
+        let task = BlockTask::err(self, err_msg);
         let task_json = json!(task);
         let msg = RocksMsg::new(RocksMethod::Put, self.task_id.clone(), Some(Value::String(task_json.to_string())));
         let _ = rocks_channel.lock().unwrap().send(msg);
@@ -86,46 +87,41 @@ pub struct BlockTask {
     pub chain: String,
     pub chain_id: String,
     pub start_height: u64,
+    pub curr_height: u64,
     pub nodes: Vec<String>,
     pub status: String,
     pub err_msg: String,
 }
 
 impl BlockTask {
-    pub fn new(chain: String, params: &Map<String, Value>) -> BlockTask {
-        let nodes = params.get("nodes").unwrap().as_array().unwrap().iter().map(|n| { String::from(n.as_str().unwrap()) }).collect();
-        BlockTask {
-            task_id: format!("{}:{}:{}", "task:block", chain, params.get("chain_id").unwrap().as_str().unwrap()),
-            chain,
-            chain_id: String::from(params.get("chain_id").unwrap().as_str().unwrap()),
-            start_height: params.get("start_height").unwrap().as_u64().unwrap(),
-            nodes,
-            status: String::from("working"),
-            err_msg: String::from(""),
-        }
-    }
-
-    pub fn from(sub_block: &SubscribeBlock, err_msg: String) -> BlockTask {
+   pub fn err(sub_block: &SubscribeBlock, err_msg: String) -> BlockTask {
         BlockTask {
             task_id: sub_block.task_id.clone(),
             chain: sub_block.chain.clone(),
             chain_id: sub_block.chain_id.clone(),
             start_height: sub_block.start_height,
+            curr_height: sub_block.curr_height,
             nodes: sub_block.nodes.clone(),
-            status: match sub_block.status {
-                SubscribeStatus::Working => { String::from("working") }
-                SubscribeStatus::Error => { String::from("error") }
-            },
+            status: sub_block.status.value(),
             err_msg,
         }
     }
 
-    fn sub_status(status: String) -> SubscribeStatus {
-        if status == String::from("working") {
-            SubscribeStatus::Working
-        } else {
-            SubscribeStatus::Error
+    pub fn from(sub_block: &SubscribeBlock) -> BlockTask {
+        BlockTask {
+            task_id: sub_block.task_id.clone(),
+            chain: sub_block.chain.clone(),
+            chain_id: sub_block.chain_id.clone(),
+            start_height: sub_block.start_height,
+            curr_height: sub_block.curr_height,
+            nodes: sub_block.nodes.clone(),
+            status: sub_block.status.value(),
+            err_msg: String::from(""),
         }
+    }
+
+    pub fn task_id(chain: &str, params: &Map<String, Value>) -> String {
+        format!("{}:{}:{}", "task:block", chain, params.get("chain_id").unwrap().as_str().unwrap())
     }
 }
 
@@ -133,4 +129,23 @@ impl BlockTask {
 pub enum SubscribeStatus {
     Working,
     Error,
+}
+
+impl SubscribeStatus {
+    fn value(&self) -> String {
+        match self {
+            SubscribeStatus::Working => String::from("working"),
+            SubscribeStatus::Error => String::from("error"),
+        }
+    }
+
+    fn find(status: &str) -> SubscribeStatus {
+        match status {
+            "working" => SubscribeStatus::Working,
+            "error" => SubscribeStatus::Error,
+            _ => {
+                panic!("matched status does not exist");
+            }
+        }
+    }
 }
