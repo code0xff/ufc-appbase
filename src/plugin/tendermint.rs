@@ -245,6 +245,21 @@ impl Plugin for TendermintPlugin {
                                     let _ = rocks_channel.lock().unwrap().send(message);
 
                                     sub_event.curr_height += 1;
+                                } else {
+                                    let err = map.get("error").unwrap().as_object().unwrap();
+                                    let err_code = err.get("code").unwrap().as_i64().unwrap();
+                                    let err_msg = err.get("data").unwrap().as_str().unwrap().to_string();
+                                    if status.is_server_error() {
+                                        if err_code == -32603 {
+                                            println!("waiting for next block...");
+                                        } else {
+                                            sub_event.handle_err(&rocks_channel, err_msg);
+                                        }
+                                    } else if status == reqwest::StatusCode::NOT_FOUND {
+                                        sub_event.handle_err(&rocks_channel, err_msg);
+                                    } else {
+                                        sub_event.err(&rocks_channel, err_msg);
+                                    }
                                 }
                             }
                             Err(err) => {
