@@ -54,7 +54,7 @@ impl SubscribeEvent {
     }
 
     pub fn event_id(&self) -> String {
-        format!("{}:{}:{}:{}", self.target.value(), self.chain, self.sub_id, self.curr_height)
+        format!("{}:{}:{}:{}", self.chain, self.target.value(), self.sub_id, self.curr_height)
     }
 
     pub fn handle_err(&mut self, rocks_ch: &ChannelHandle, err_msg: String) {
