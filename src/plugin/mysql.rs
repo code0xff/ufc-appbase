@@ -48,13 +48,13 @@ impl MySqlMethod {
         }
     }
 
-    fn find(method: &str) -> MySqlMethod {
+    fn find(method: &str) -> Option<MySqlMethod> {
         match method {
-            "insert" => MySqlMethod::Insert,
-            "update" => MySqlMethod::Update,
-            "delete" => MySqlMethod::Delete,
+            "insert" => Some(MySqlMethod::Insert),
+            "update" => Some(MySqlMethod::Update),
+            "delete" => Some(MySqlMethod::Delete),
             _ => {
-                panic!("matched method does not exist");
+                None
             }
         }
     }
