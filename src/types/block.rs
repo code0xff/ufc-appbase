@@ -37,7 +37,7 @@ impl SubscribeBlock {
     pub fn from(params: &Map<String, Value>) -> SubscribeBlock {
         let start_height = params.get("start_height").unwrap().as_u64().unwrap();
         let nodes = params.get("nodes").unwrap().as_array().unwrap().iter().map(|n| { String::from(n.as_str().unwrap()) }).collect();
-        let task_status = params.get("status").unwrap().as_str().unwrap().to_string();
+        let task_status = params.get("status").unwrap().as_str().unwrap();
         SubscribeBlock {
             task_id: String::from(params.get("task_id").unwrap().as_str().unwrap()),
             chain: String::from(params.get("chain").unwrap().as_str().unwrap()),
@@ -46,7 +46,7 @@ impl SubscribeBlock {
             curr_height: start_height,
             nodes,
             node_idx: 0,
-            status: BlockTask::sub_status(task_status),
+            status: SubscribeStatus::find(task_status),
         }
     }
 
@@ -75,7 +75,7 @@ impl SubscribeBlock {
     pub fn err(&mut self, rocks_channel: &ChannelHandle, err_msg: String) {
         println!("{}", err_msg);
         self.status = SubscribeStatus::Error;
-        let task = BlockTask::from(self, err_msg);
+        let task = BlockTask::err(self, err_msg);
         let task_json = json!(task);
         let msg = RocksMsg::new(RocksMethod::Put, self.task_id.clone(), Some(Value::String(task_json.to_string())));
         let _ = rocks_channel.lock().unwrap().send(msg);
@@ -96,18 +96,19 @@ pub struct BlockTask {
 impl BlockTask {
     pub fn new(chain: String, params: &Map<String, Value>) -> BlockTask {
         let nodes = params.get("nodes").unwrap().as_array().unwrap().iter().map(|n| { String::from(n.as_str().unwrap()) }).collect();
+        let start_height = params.get("start_height").unwrap().as_u64().unwrap();
         BlockTask {
             task_id: format!("{}:{}:{}", "task:block", chain, params.get("chain_id").unwrap().as_str().unwrap()),
             chain,
             chain_id: String::from(params.get("chain_id").unwrap().as_str().unwrap()),
-            start_height: params.get("start_height").unwrap().as_u64().unwrap(),
+            start_height,
             nodes,
             status: SubscribeStatus::Working.value(),
             err_msg: String::from(""),
         }
     }
 
-    pub fn from(sub_block: &SubscribeBlock, err_msg: String) -> BlockTask {
+    pub fn err(sub_block: &SubscribeBlock, err_msg: String) -> BlockTask {
         BlockTask {
             task_id: sub_block.task_id.clone(),
             chain: sub_block.chain.clone(),
@@ -134,8 +135,8 @@ impl SubscribeStatus {
         }
     }
 
-    fn find(method: &str) -> SubscribeStatus {
-        match method {
+    fn find(status: &str) -> SubscribeStatus {
+        match status {
             "working" => SubscribeStatus::Working,
             "error" => SubscribeStatus::Error,
             _ => {
