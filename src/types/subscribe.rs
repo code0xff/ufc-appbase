@@ -57,12 +57,12 @@ impl SubscribeEvent {
         format!("{}:{}:{}:{}", self.chain, self.target.value(), self.sub_id, self.curr_height)
     }
 
-    pub fn handle_err(&mut self, rocks_ch: &ChannelHandle, err_msg: String) {
+    pub fn handle_err(&mut self, rocks_channel: &ChannelHandle, err_msg: String) {
         println!("{}", err_msg);
         if usize::from(self.node_idx) + 1 < self.nodes.len() {
             self.node_idx += 1;
         } else {
-            self.err(rocks_ch, err_msg);
+            self.err(rocks_channel, err_msg);
         }
     }
 
