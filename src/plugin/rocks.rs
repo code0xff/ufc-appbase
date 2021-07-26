@@ -8,7 +8,7 @@ use serde_json::{json, Map, Value};
 
 use crate::libs::serialize;
 use crate::plugin::jsonrpc::JsonRpcPlugin;
-use crate::validation::get_task;
+use crate::validation::{find_by_key, get_task};
 
 pub struct RocksPlugin {
     base: PluginBase,
@@ -78,6 +78,19 @@ impl RocksPlugin {
         }
         Value::Array(result)
     }
+
+    pub fn find_by_key(db: &RocksDB, key: &str) -> Value {
+        let db_lock = db.lock().unwrap();
+        let result = db_lock.get(key.as_bytes()).unwrap();
+        match result {
+            None => {
+                Value::Object(Map::new())
+            }
+            Some(value) => {
+                Value::Object(serde_json::from_str(String::from_utf8(value).unwrap().as_str()).unwrap())
+            }
+        }
+    }
 }
 
 appbase_plugin_requires!(RocksPlugin; );
@@ -122,6 +135,18 @@ impl Plugin for RocksPlugin {
             };
             let tasks = Self::find_by_prefix_static(&db, prefix);
             Box::new(futures::future::ready(Ok(tasks)))
+        });
+
+        let db = Arc::clone(self.db.as_ref().unwrap());
+        jsonrpc.add_method(String::from("find_by_key"), move |params: Params| {
+            let params: Map<String, Value> = params.parse().unwrap();
+            let verified = find_by_key::verify(&params);
+            if verified.is_err() {
+                return Box::new(futures::future::ready(Ok(Value::String(verified.unwrap_err()))));
+            }
+            let key = params.get("key").unwrap().as_str().unwrap();
+            let value = Self::find_by_key(&db, key);
+            Box::new(futures::future::ready(Ok(value)))
         });
     }
 
