@@ -35,15 +35,14 @@ impl SubscribeBlock {
     }
 
     pub fn from(params: &Map<String, Value>) -> SubscribeBlock {
-        let start_height = params.get("start_height").unwrap().as_u64().unwrap();
         let nodes = params.get("nodes").unwrap().as_array().unwrap().iter().map(|n| { String::from(n.as_str().unwrap()) }).collect();
         let task_status = params.get("status").unwrap().as_str().unwrap();
         SubscribeBlock {
             task_id: String::from(params.get("task_id").unwrap().as_str().unwrap()),
             chain: String::from(params.get("chain").unwrap().as_str().unwrap()),
             chain_id: String::from(params.get("chain_id").unwrap().as_str().unwrap()),
-            start_height,
-            curr_height: start_height,
+            start_height: params.get("start_height").unwrap().as_u64().unwrap(),
+            curr_height: params.get("curr_height").unwrap().as_u64().unwrap(),
             nodes,
             node_idx: 0,
             status: SubscribeStatus::find(task_status),
@@ -88,36 +87,41 @@ pub struct BlockTask {
     pub chain: String,
     pub chain_id: String,
     pub start_height: u64,
+    pub curr_height: u64,
     pub nodes: Vec<String>,
     pub status: String,
     pub err_msg: String,
 }
 
 impl BlockTask {
-    pub fn new(chain: String, params: &Map<String, Value>) -> BlockTask {
-        let nodes = params.get("nodes").unwrap().as_array().unwrap().iter().map(|n| { String::from(n.as_str().unwrap()) }).collect();
-        let start_height = params.get("start_height").unwrap().as_u64().unwrap();
-        BlockTask {
-            task_id: format!("{}:{}:{}", "task:block", chain, params.get("chain_id").unwrap().as_str().unwrap()),
-            chain,
-            chain_id: String::from(params.get("chain_id").unwrap().as_str().unwrap()),
-            start_height,
-            nodes,
-            status: SubscribeStatus::Working.value(),
-            err_msg: String::from(""),
-        }
-    }
-
-    pub fn err(sub_block: &SubscribeBlock, err_msg: String) -> BlockTask {
+   pub fn err(sub_block: &SubscribeBlock, err_msg: String) -> BlockTask {
         BlockTask {
             task_id: sub_block.task_id.clone(),
             chain: sub_block.chain.clone(),
             chain_id: sub_block.chain_id.clone(),
             start_height: sub_block.start_height,
+            curr_height: sub_block.curr_height,
             nodes: sub_block.nodes.clone(),
             status: sub_block.status.value(),
             err_msg,
         }
+    }
+
+    pub fn from(sub_block: &SubscribeBlock) -> BlockTask {
+        BlockTask {
+            task_id: sub_block.task_id.clone(),
+            chain: sub_block.chain.clone(),
+            chain_id: sub_block.chain_id.clone(),
+            start_height: sub_block.start_height,
+            curr_height: sub_block.curr_height,
+            nodes: sub_block.nodes.clone(),
+            status: sub_block.status.value(),
+            err_msg: String::from(""),
+        }
+    }
+
+    pub fn task_id(chain: &str, params: &Map<String, Value>) -> String {
+        format!("{}:{}:{}", "task:block", chain, params.get("chain_id").unwrap().as_str().unwrap())
     }
 }
 

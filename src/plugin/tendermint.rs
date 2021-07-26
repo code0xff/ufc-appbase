@@ -12,6 +12,7 @@ use serde_json::{json, Map, Value};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::plugin::rocks::{RocksMethod, RocksMsg, RocksPlugin};
 use crate::types::block::{BlockTask, SubscribeBlock};
+use crate::types::channel::{MultiChannel};
 use crate::validation::{subscribe, unsubscribe};
 
 pub struct TendermintPlugin {
@@ -24,9 +25,7 @@ pub struct TendermintPlugin {
 impl TendermintPlugin {
     fn init(&mut self) {
         self.sub_blocks = Some(Arc::new(FutureMutex::new(HashMap::new())));
-        let mut channels = MultiChannel::new();
-        channels.add("tendermint");
-        channels.add("rocks");
+        let channels = MultiChannel::new(vec!(String::from("tendermint"), String::from("rocks")));
         self.channels = Some(channels.to_owned());
         self.monitor = Some(app::subscribe_channel(String::from("tendermint")));
     }
@@ -36,7 +35,6 @@ impl TendermintPlugin {
         let mut jsonrpc_plugin = jsonrpc_plugin_handle.lock().unwrap();
         let jsonrpc = jsonrpc_plugin.downcast_mut::<JsonRpcPlugin>().unwrap();
 
-        let rocks_channel = self.channels.as_ref().unwrap().get("rocks");
         let tm_channel = self.channels.as_ref().unwrap().get("tendermint");
         jsonrpc.add_method(String::from("tm_subscribe_block"), move |params: Params| {
             let params: Map<String, Value> = params.parse().unwrap();
@@ -47,16 +45,10 @@ impl TendermintPlugin {
             let message = TendermintMsg::new(TendermintMethod::SubscribeBlock, Value::Object(params.clone()));
             let _ = tm_channel.lock().unwrap().send(message);
 
-            let new_block_task = BlockTask::new(String::from("tendermint"), &params);
-            let task_id = new_block_task.task_id.clone();
-            let value = json!(new_block_task);
-            let message = RocksMsg::new(RocksMethod::Put, task_id.clone(), Some(Value::String(value.to_string())));
-            let _ = rocks_channel.lock().unwrap().send(message);
-
+            let task_id = BlockTask::task_id("tendermint", &params);
             Box::new(futures::future::ready(Ok(Value::String(format!("subscription requested! task_id={}", task_id)))))
         });
 
-        let rocks_channel = self.channels.as_ref().unwrap().get("rocks");
         let tm_channel = self.channels.as_ref().unwrap().get("tendermint");
         jsonrpc.add_method(String::from("tm_unsubscribe_block"), move |params: Params| {
             let params: Map<String, Value> = params.parse().unwrap();
@@ -67,10 +59,6 @@ impl TendermintPlugin {
 
             let tm_msg = TendermintMsg::new(TendermintMethod::UnsubscribeBlock, Value::Object(params.clone()));
             let _ = tm_channel.lock().unwrap().send(tm_msg);
-
-            let task_id = params.get("task_id").unwrap().as_str().unwrap().to_string();
-            let rocks_msg = RocksMsg::new(RocksMethod::Delete, task_id.clone(), None);
-            let _ = rocks_channel.lock().unwrap().send(rocks_msg);
 
             let task_id = params.get("task_id").unwrap().as_str().unwrap();
             Box::new(futures::future::ready(Ok(Value::String(format!("unsubscription requested! task_id={}", task_id)))))
@@ -92,27 +80,6 @@ impl TendermintPlugin {
                     sub_blocks_lock.insert(block.task_id.clone(), block);
                 }
             });
-    }
-}
-
-#[derive(Clone)]
-struct MultiChannel {
-    channel_map: HashMap<String, ChannelHandle>,
-}
-
-impl MultiChannel {
-    fn new() -> MultiChannel {
-        MultiChannel {
-            channel_map: HashMap::new(),
-        }
-    }
-
-    fn add(&mut self, name: &str) {
-        self.channel_map.insert(String::from(name), app::get_channel(String::from(name)));
-    }
-
-    fn get(&self, name: &str) -> ChannelHandle {
-        Arc::clone(self.channel_map.get(name).unwrap())
     }
 }
 
@@ -200,11 +167,20 @@ impl Plugin for TendermintPlugin {
                     match method {
                         TendermintMethod::SubscribeBlock => {
                             let new_sub_block = SubscribeBlock::new(String::from("tendermint"), &params);
-                            sub_blocks_lock.insert(new_sub_block.task_id.clone(), new_sub_block);
+                            sub_blocks_lock.insert(new_sub_block.task_id.clone(), new_sub_block.clone());
+
+                            let new_block_task = BlockTask::from(&new_sub_block);
+                            let task_id = new_block_task.task_id.clone();
+                            let value = json!(new_block_task);
+                            let message = RocksMsg::new(RocksMethod::Put, task_id.clone(), Some(Value::String(value.to_string())));
+                            let _ = rocks_channel.lock().unwrap().send(message);
                         }
                         TendermintMethod::UnsubscribeBlock => {
                             let task_id = String::from(params.get("task_id").unwrap().as_str().unwrap());
                             sub_blocks_lock.remove(&task_id);
+
+                            let rocks_msg = RocksMsg::new(RocksMethod::Delete, task_id.clone(), None);
+                            let _ = rocks_channel.lock().unwrap().send(rocks_msg);
                         }
                     };
                 }
@@ -227,12 +203,15 @@ impl Plugin for TendermintPlugin {
                                 let block_header = block.get("header").unwrap();
 
                                 println!("key={}, value={:?}", sub_block.block_id(), block_header);
+
                                 // rabbit
                                 // let _ = rabbit_channel.lock().unwrap().send(Value::String(block_header.to_string()));
 
-                                // rocks
-                                let msg = RocksMsg::new(RocksMethod::Put, sub_block.block_id(), Some(Value::String(block_header.to_string())));
-                                let _ = rocks_channel.lock().unwrap().send(msg);
+                                let block_task = BlockTask::from(&sub_block);
+                                let task_id = block_task.task_id.clone();
+                                let value = json!(block_task);
+                                let message = RocksMsg::new(RocksMethod::Put, task_id.clone(), Some(Value::String(value.to_string())));
+                                let _ = rocks_channel.lock().unwrap().send(message);
 
                                 sub_block.curr_height += 1;
                             } else {
