@@ -32,3 +32,35 @@ macro_rules! enumeration {
         }
     }
 }
+
+#[cfg(test)]
+mod enumeration_test {
+    use crate::types::enumeration::Enumeration;
+    use crate::enumeration;
+
+    enumeration!(TestType; {A: "a"}, {B: "b"});
+
+    #[test]
+    fn enumeration_value_test() {
+        let value = TestType::A.value();
+        assert_eq!(value, "a");
+    }
+
+    #[test]
+    fn enumeration_find_test() {
+        let test_type = TestType::find("a").unwrap();
+        assert_eq!(test_type, TestType::A);
+    }
+
+    #[test]
+    fn enumeration_valid_test() {
+        let valid = TestType::valid("a");
+        assert!(valid);
+    }
+
+    #[test]
+    fn enumeration_invalid_test() {
+        let invalid = TestType::valid("c");
+        assert!(!invalid);
+    }
+}

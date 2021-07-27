@@ -8,7 +8,7 @@ pub struct MultiChannel {
 }
 
 impl MultiChannel {
-    pub fn new(channels: Vec<String>) -> MultiChannel {
+    pub fn new(channels: Vec<String>) -> Self {
         let mut channel_map = HashMap::new();
         for channel_nm in channels.iter() {
             channel_map.insert(channel_nm.clone(), app::get_channel(channel_nm.clone()));

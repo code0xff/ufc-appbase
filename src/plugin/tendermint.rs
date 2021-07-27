@@ -10,7 +10,7 @@ use jsonrpc_core::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use crate::{get_object, get_str, get_string, enumeration};
+use crate::{enumeration, get_object, get_str, get_string};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::plugin::rocks::{RocksMethod, RocksMsg, RocksPlugin};
 use crate::types::channel::MultiChannel;
@@ -86,7 +86,7 @@ impl TendermintPlugin {
     }
 
     fn sync_event(sub_event: &mut SubscribeEvent, rocks_channel: &ChannelHandle) {
-        let task = SubscribeTask::from(&sub_event);
+        let task = SubscribeTask::new(&sub_event);
         let task_id = task.task_id.clone();
         let value = json!(task);
         let message = RocksMsg::new(RocksMethod::Put, task_id.clone(), Some(Value::String(value.to_string())));
@@ -160,7 +160,7 @@ impl Plugin for TendermintPlugin {
                             let new_event = SubscribeEvent::new(String::from("tendermint"), &params);
                             sub_events_lock.insert(new_event.task_id.clone(), new_event.clone());
 
-                            let new_task = SubscribeTask::from(&new_event);
+                            let new_task = SubscribeTask::new(&new_event);
                             let task_id = new_task.task_id.clone();
                             let value = json!(new_task);
                             let message = RocksMsg::new(RocksMethod::Put, task_id.clone(), Some(Value::String(value.to_string())));
@@ -221,7 +221,12 @@ impl Plugin for TendermintPlugin {
                                 let res_body = res.text().await;
                                 match res_body {
                                     Ok(body_str) => {
-                                        let body: Map<String, Value> = serde_json::from_str(body_str.as_str()).unwrap();
+                                        let parsed_body = serde_json::from_str(body_str.as_str());
+                                        if parsed_body.is_err() {
+                                            println!("parsing error occurred...");
+                                            continue;
+                                        }
+                                        let body: Map<String, Value> = parsed_body.unwrap();
                                         if status.is_success() {
                                             match sub_event.target {
                                                 SubscribeTarget::Block => {

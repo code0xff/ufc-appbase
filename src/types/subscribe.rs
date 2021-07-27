@@ -21,7 +21,7 @@ pub struct SubscribeEvent {
 }
 
 impl SubscribeEvent {
-    pub fn new(chain: String, params: &Map<String, Value>) -> SubscribeEvent {
+    pub fn new(chain: String, params: &Map<String, Value>) -> Self {
         let sub_id = get_string!(params; "sub_id");
         let start_height = get_u64!(params; "start_height");
         SubscribeEvent {
@@ -37,7 +37,7 @@ impl SubscribeEvent {
         }
     }
 
-    pub fn from(params: &Map<String, Value>) -> SubscribeEvent {
+    pub fn from(params: &Map<String, Value>) -> Self {
         SubscribeEvent {
             task_id: get_string!(params; "task_id"),
             target: SubscribeTarget::find(get_str!(params; "target")).unwrap(),
@@ -71,7 +71,7 @@ impl SubscribeEvent {
     pub fn err(&mut self, rocks_channel: &ChannelHandle, err_msg: String) {
         println!("{}", err_msg);
         self.status = SubscribeStatus::Error;
-        let task = SubscribeTask::err(self, err_msg);
+        let task = SubscribeTask::from(self, err_msg);
         let msg = RocksMsg::new(RocksMethod::Put, self.task_id.clone(), Some(Value::String(json!(task).to_string())));
         let _ = rocks_channel.lock().unwrap().send(msg);
     }
@@ -91,7 +91,7 @@ pub struct SubscribeTask {
 }
 
 impl SubscribeTask {
-    pub fn err(sub_block: &SubscribeEvent, err_msg: String) -> SubscribeTask {
+    pub fn from(sub_block: &SubscribeEvent, err_msg: String) -> Self {
         SubscribeTask {
             task_id: sub_block.task_id.clone(),
             target: sub_block.target.value(),
@@ -105,18 +105,8 @@ impl SubscribeTask {
         }
     }
 
-    pub fn from(sub_block: &SubscribeEvent) -> SubscribeTask {
-        SubscribeTask {
-            task_id: sub_block.task_id.clone(),
-            target: sub_block.target.value(),
-            chain: sub_block.chain.clone(),
-            sub_id: sub_block.sub_id.clone(),
-            start_height: sub_block.start_height,
-            curr_height: sub_block.curr_height,
-            nodes: sub_block.nodes.clone(),
-            status: sub_block.status.value(),
-            err_msg: String::from(""),
-        }
+    pub fn new(sub_block: &SubscribeEvent) -> Self {
+        Self::from(sub_block, String::from(""))
     }
 
     pub fn task_id(chain: &str, params: &Map<String, Value>) -> String {
@@ -127,6 +117,79 @@ impl SubscribeTask {
 enumeration!(SubscribeTarget; {Block: "block"}, {Tx: "tx"});
 enumeration!(SubscribeStatus; {Working: "working"}, {Error: "error"});
 
-impl SubscribeTarget {
+#[cfg(test)]
+mod subscribe_test {
+    use appbase::*;
+    use serde_json::{json, Map};
 
+    use crate::types::subscribe::{SubscribeEvent, SubscribeStatus, SubscribeTask};
+
+    #[test]
+    fn subscribe_event_task_id_test() {
+        let mut params = Map::new();
+        params.insert(String::from("sub_id"), json!("cosmoshub-4"));
+        params.insert(String::from("start_height"), json!(1u64));
+        params.insert(String::from("target"), json!("block"));
+        params.insert(String::from("nodes"), json!(["https://api.cosmos.network"]));
+
+        let subscribe_event = SubscribeEvent::new(String::from("tendermint"), &params);
+        assert_eq!(subscribe_event.task_id, "task:tendermint:block:cosmoshub-4");
+    }
+
+    #[test]
+    fn subscribe_event_is_workable_test() {
+        let mut params = Map::new();
+        params.insert(String::from("sub_id"), json!("cosmoshub-4"));
+        params.insert(String::from("start_height"), json!(1u64));
+        params.insert(String::from("target"), json!("block"));
+        params.insert(String::from("nodes"), json!(["https://api.cosmos.network"]));
+
+        let subscribe_event = SubscribeEvent::new(String::from("tendermint"), &params);
+        assert!(subscribe_event.is_workable());
+    }
+
+    #[test]
+    fn subscribe_event_event_id_test() {
+        let mut params = Map::new();
+        params.insert(String::from("sub_id"), json!("cosmoshub-4"));
+        params.insert(String::from("start_height"), json!(1u64));
+        params.insert(String::from("target"), json!("block"));
+        params.insert(String::from("nodes"), json!(["https://api.cosmos.network"]));
+
+        let subscribe_event = SubscribeEvent::new(String::from("tendermint"), &params);
+        assert_eq!(subscribe_event.event_id(), "tendermint:block:cosmoshub-4:1");
+    }
+
+    #[test]
+    fn subscribe_event_handle_err_fallback_test() {
+        let mut params = Map::new();
+        params.insert(String::from("sub_id"), json!("cosmoshub-4"));
+        params.insert(String::from("start_height"), json!(1u64));
+        params.insert(String::from("target"), json!("block"));
+        params.insert(String::from("nodes"), json!(["https://api.cosmos.network", "https://api.cosmos2.network"]));
+
+        let rocks_channel = app::get_channel(String::from("rocks"));
+
+        let mut subscribe_event = SubscribeEvent::new(String::from("tendermint"), &params);
+        subscribe_event.handle_err(&rocks_channel, String::from("error_test"));
+
+        assert_eq!(subscribe_event.node_idx, 1);
+    }
+
+    #[test]
+    fn subscribe_event_handle_err_test() {
+        let mut params = Map::new();
+        params.insert(String::from("sub_id"), json!("cosmoshub-4"));
+        params.insert(String::from("start_height"), json!(1u64));
+        params.insert(String::from("target"), json!("block"));
+        params.insert(String::from("nodes"), json!(["https://api.cosmos.network"]));
+
+        let rocks_channel = app::get_channel(String::from("rocks"));
+
+        let mut subscribe_event = SubscribeEvent::new(String::from("tendermint"), &params);
+        let prev_node_idx = subscribe_event.node_idx;
+        subscribe_event.handle_err(&rocks_channel, String::from("error_test"));
+
+        assert_eq!(SubscribeStatus::Error, subscribe_event.status);
+    }
 }
