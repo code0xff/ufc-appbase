@@ -8,6 +8,8 @@ use mongodb::bson;
 use mongodb::bson::*;
 use mongodb::options::ClientOptions;
 
+use crate::{get_str, get_string};
+
 pub struct MongoPlugin {
     base: PluginBase,
     db: Option<MongoDB>,
@@ -53,7 +55,7 @@ impl Plugin for MongoPlugin {
                 let db_lock = db.lock().await;
                 if let Ok(msg) = mon_lock.try_recv() {
                     let map = msg.as_object().unwrap();
-                    let coll_nm = String::from(map.get("collection").unwrap().as_str().unwrap());
+                    let coll_nm = get_string!(map; "collection");
 
                     let coll = db_lock.collection::<Document>(coll_nm.as_str());
                     let doc = bson::to_document(&map).unwrap();

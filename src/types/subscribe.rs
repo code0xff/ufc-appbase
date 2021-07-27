@@ -2,9 +2,10 @@ use appbase::ChannelHandle;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
+use crate::{enumeration, get_str, get_string, get_string_vec, get_u64};
 use crate::plugin::rocks::{RocksMethod, RocksMsg};
-use crate::types::subscribe::SubscribeStatus::Working;
 use crate::types::enumeration::Enumeration;
+use crate::types::subscribe::SubscribeStatus::Working;
 
 #[derive(Debug, Clone)]
 pub struct SubscribeEvent {
@@ -21,16 +22,16 @@ pub struct SubscribeEvent {
 
 impl SubscribeEvent {
     pub fn new(chain: String, params: &Map<String, Value>) -> SubscribeEvent {
-        let sub_id = String::from(params.get("sub_id").unwrap().as_str().unwrap());
-        let start_height = params.get("start_height").unwrap().as_u64().unwrap();
+        let sub_id = get_string!(params; "sub_id");
+        let start_height = get_u64!(params; "start_height");
         SubscribeEvent {
-            task_id: format!("task:{}:{}:{}", chain, params.get("target").unwrap().as_str().unwrap(), sub_id),
-            target: SubscribeTarget::find(params.get("target").unwrap().as_str().unwrap()).unwrap(),
+            task_id: format!("task:{}:{}:{}", chain, get_str!(params; "target"), sub_id),
+            target: SubscribeTarget::find(get_str!(params; "target")).unwrap(),
             chain,
             sub_id,
             start_height,
             curr_height: start_height,
-            nodes: params.get("nodes").unwrap().as_array().unwrap().iter().map(|n| { String::from(n.as_str().unwrap()) }).collect(),
+            nodes: get_string_vec!(params; "nodes"),
             node_idx: 0,
             status: SubscribeStatus::Working,
         }
@@ -38,15 +39,15 @@ impl SubscribeEvent {
 
     pub fn from(params: &Map<String, Value>) -> SubscribeEvent {
         SubscribeEvent {
-            task_id: String::from(params.get("task_id").unwrap().as_str().unwrap()),
-            target: SubscribeTarget::find(params.get("target").unwrap().as_str().unwrap()).unwrap(),
-            chain: String::from(params.get("chain").unwrap().as_str().unwrap()),
-            sub_id: String::from(params.get("sub_id").unwrap().as_str().unwrap()),
-            start_height: params.get("start_height").unwrap().as_u64().unwrap(),
-            curr_height: params.get("curr_height").unwrap().as_u64().unwrap(),
-            nodes: params.get("nodes").unwrap().as_array().unwrap().iter().map(|n| { String::from(n.as_str().unwrap()) }).collect(),
+            task_id: get_string!(params; "task_id"),
+            target: SubscribeTarget::find(get_str!(params; "target")).unwrap(),
+            chain: get_string!(params; "chain"),
+            sub_id: get_string!(params; "sub_id"),
+            start_height: get_u64!(params; "start_height"),
+            curr_height: get_u64!(params; "curr_height"),
+            nodes: get_string_vec!(params; "nodes"),
             node_idx: 0,
-            status: SubscribeStatus::find(params.get("status").unwrap().as_str().unwrap()).unwrap(),
+            status: SubscribeStatus::find(get_str!(params; "status")).unwrap(),
         }
     }
 
@@ -71,8 +72,7 @@ impl SubscribeEvent {
         println!("{}", err_msg);
         self.status = SubscribeStatus::Error;
         let task = SubscribeTask::err(self, err_msg);
-        let task_json = json!(task);
-        let msg = RocksMsg::new(RocksMethod::Put, self.task_id.clone(), Some(Value::String(task_json.to_string())));
+        let msg = RocksMsg::new(RocksMethod::Put, self.task_id.clone(), Some(Value::String(json!(task).to_string())));
         let _ = rocks_channel.lock().unwrap().send(msg);
     }
 }
@@ -120,58 +120,13 @@ impl SubscribeTask {
     }
 
     pub fn task_id(chain: &str, params: &Map<String, Value>) -> String {
-        format!("task:{}:{}:{}", chain, params.get("target").unwrap().as_str().unwrap(), params.get("sub_id").unwrap().as_str().unwrap())
+        format!("task:{}:{}:{}", chain, get_str!(params; "target"), get_str!(params; "sub_id"))
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub enum SubscribeTarget {
-    Block,
-    Tx,
-}
-
-impl Enumeration for SubscribeTarget {
-    fn value(&self) -> String {
-        match self {
-            SubscribeTarget::Block => String::from("block"),
-            SubscribeTarget::Tx => String::from("tx"),
-        }
-    }
-
-    fn find(target: &str) -> Option<Self> {
-        match target {
-            "block" => Some(SubscribeTarget::Block),
-            "tx" => Some(SubscribeTarget::Tx),
-            _ => None,
-        }
-    }
-}
+enumeration!(SubscribeTarget; {Block: "block"}, {Tx: "tx"});
+enumeration!(SubscribeStatus; {Working: "working"}, {Error: "error"});
 
 impl SubscribeTarget {
-    pub fn valid(target: &str) -> bool {
-        Self::find(target).is_some()
-    }
-}
 
-#[derive(Debug, PartialEq, Clone)]
-pub enum SubscribeStatus {
-    Working,
-    Error,
-}
-
-impl Enumeration for SubscribeStatus {
-    fn value(&self) -> String {
-        match self {
-            SubscribeStatus::Working => String::from("working"),
-            SubscribeStatus::Error => String::from("error"),
-        }
-    }
-
-    fn find(name: &str) -> Option<Self> {
-        match name {
-            "working" => Some(SubscribeStatus::Working),
-            "error" => Some(SubscribeStatus::Error),
-            _ => None,
-        }
-    }
 }
