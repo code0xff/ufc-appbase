@@ -9,6 +9,7 @@ use serde_json::{json, Map, Value};
 use crate::libs::serialize;
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::validation::{find_by_key, get_task};
+use crate::types::enumeration::Enumeration;
 
 pub struct RocksPlugin {
     base: PluginBase,
@@ -39,7 +40,7 @@ pub enum RocksMethod {
     Delete,
 }
 
-impl RocksMethod {
+impl Enumeration for RocksMethod {
     fn value(&self) -> String {
         match self {
             RocksMethod::Put => String::from("put"),
@@ -47,13 +48,11 @@ impl RocksMethod {
         }
     }
 
-    fn find(method: &str) -> RocksMethod {
-        match method {
-            "put" => RocksMethod::Put,
-            "delete" => RocksMethod::Delete,
-            _ => {
-                panic!("matched method does not exist");
-            }
+    fn find(name: &str) -> Option<Self> {
+        match name {
+            "put" => Some(RocksMethod::Put),
+            "delete" => Some(RocksMethod::Delete),
+            _ => None
         }
     }
 }
@@ -162,7 +161,7 @@ impl Plugin for RocksPlugin {
                 let db_lock = db.lock().unwrap();
                 if let Ok(msg) = mon_lock.try_recv() {
                     let data = msg.as_object().unwrap();
-                    let method = RocksMethod::find(data.get("method").unwrap().as_str().unwrap());
+                    let method = RocksMethod::find(data.get("method").unwrap().as_str().unwrap()).unwrap();
                     match method {
                         RocksMethod::Put => {
                             let key = data.get("key").unwrap().as_str().unwrap();

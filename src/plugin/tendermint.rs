@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -12,7 +13,7 @@ use serde_json::{json, Map, Value};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::plugin::rocks::{RocksMethod, RocksMsg, RocksPlugin};
 use crate::types::channel::MultiChannel;
-use crate::types::jsonrpc::JsonRpcRequest;
+use crate::types::enumeration::Enumeration;
 use crate::types::subscribe::{SubscribeEvent, SubscribeTarget, SubscribeTask};
 use crate::validation::{subscribe, unsubscribe};
 
@@ -82,6 +83,16 @@ impl TendermintPlugin {
                 }
             });
     }
+
+    fn sync_event(sub_event: &mut SubscribeEvent, rocks_channel: &ChannelHandle) {
+        let task = SubscribeTask::from(&sub_event);
+        let task_id = task.task_id.clone();
+        let value = json!(task);
+        let message = RocksMsg::new(RocksMethod::Put, task_id.clone(), Some(Value::String(value.to_string())));
+        let _ = rocks_channel.lock().unwrap().send(message);
+
+        sub_event.curr_height += 1;
+    }
 }
 
 type SubscribeEvents = Arc<FutureMutex<HashMap<String, SubscribeEvent>>>;
@@ -107,7 +118,7 @@ pub enum TendermintMethod {
     Unsubscribe,
 }
 
-impl TendermintMethod {
+impl Enumeration for TendermintMethod {
     fn value(&self) -> String {
         match self {
             TendermintMethod::Subscribe => String::from("subscribe"),
@@ -115,13 +126,11 @@ impl TendermintMethod {
         }
     }
 
-    fn find(method: &str) -> Option<TendermintMethod> {
+    fn find(method: &str) -> Option<Self> {
         match method {
             "subscribe" => Some(TendermintMethod::Subscribe),
             "unsubscribe" => Some(TendermintMethod::Unsubscribe),
-            _ => {
-                None
-            }
+            _ => None
         }
     }
 }
@@ -191,74 +200,72 @@ impl Plugin for TendermintPlugin {
                         let res_result = match sub_event.target {
                             SubscribeTarget::Block => {
                                 let node_index = usize::from(sub_event.node_idx);
-                                let req_url = sub_event.nodes[node_index].to_string() + sub_event.curr_height.to_string().as_str();
+                                let req_url = format!("{}/blocks/{}", sub_event.nodes[node_index], sub_event.curr_height);
                                 reqwest::get(req_url).await
                             }
                             SubscribeTarget::Tx => {
-                                let req_body = JsonRpcRequest::params(sub_event.curr_height);
-                                let req = JsonRpcRequest::new(1, String::from("tx_search"), req_body);
-                                let client = reqwest::Client::new();
-                                let node_index = usize::from(sub_event.node_idx);
-                                client.post(sub_event.nodes[node_index].to_string())
-                                    .body(json!(req).to_string())
-                                    .send()
-                                    .await
+                                let node_idx = usize::from(sub_event.node_idx);
+                                let latest_req_url = format!("{}/blocks/latest", sub_event.nodes[node_idx]);
+                                let res_result = reqwest::get(latest_req_url)
+                                    .await;
+                                if res_result.is_ok() {
+                                    let res_body = res_result.unwrap().text().await;
+                                    if res_body.is_ok() {
+                                        let body: Map<String, Value> = serde_json::from_str(res_body.unwrap().as_str()).unwrap();
+                                        let block = body.get("block").unwrap().as_object().unwrap();
+                                        let header = block.get("header").unwrap().as_object().unwrap();
+                                        let height = header.get("height").unwrap().as_str().unwrap();
+                                        let latest_height = u64::from_str(height).unwrap();
+                                        if sub_event.curr_height <= latest_height {
+                                            let node_index = usize::from(sub_event.node_idx);
+                                            let req_url = format!("{}/txs?page=1&limit=100&tx.height={}", sub_event.nodes[node_index], sub_event.curr_height);
+                                            reqwest::get(req_url).await
+                                        } else {
+                                            println!("waiting for next block...");
+                                            continue;
+                                        }
+                                    } else {
+                                        sub_event.handle_err(&rocks_channel, res_body.unwrap_err().to_string());
+                                        continue;
+                                    }
+                                } else {
+                                    sub_event.handle_err(&rocks_channel, res_result.unwrap_err().to_string());
+                                    continue;
+                                }
                             }
                         };
 
                         match res_result {
                             Ok(res) => {
                                 let status = res.status().clone();
-                                let body = res
+                                let res_body = res
                                     .text()
                                     .await
                                     .unwrap();
-                                let map: Map<String, Value> = serde_json::from_str(body.as_str()).unwrap();
+                                let body: Map<String, Value> = serde_json::from_str(res_body.as_str()).unwrap();
                                 if status.is_success() {
                                     match sub_event.target {
                                         SubscribeTarget::Block => {
-                                            let result = map.get("result").unwrap().as_object().unwrap();
-                                            let block = result.get("block").unwrap().as_object().unwrap();
+                                            let block = body.get("block").unwrap().as_object().unwrap();
                                             let header = block.get("header").unwrap();
 
                                             println!("event_id={}, header={:?}", sub_event.event_id(), header);
                                         }
                                         SubscribeTarget::Tx => {
-                                            let result = map.get("result").unwrap().as_object().unwrap();
-                                            let txs = result.get("txs").unwrap().as_array().unwrap();
+                                            let txs = body.get("txs").unwrap().as_array().unwrap();
                                             for tx_val in txs.iter() {
                                                 let tx = tx_val.as_object().unwrap();
-                                                let hash = tx.get("hash").unwrap().as_str().unwrap();
-                                                let height = tx.get("height").unwrap().as_str().unwrap();
-                                                let tx_result = tx.get("tx_result").unwrap().as_object().unwrap();
-                                                let log = tx_result.get("log").unwrap().as_str().unwrap();
-
-                                                println!("event_id={}, hash={}, height={}, log={}", sub_event.event_id(), hash, height, log);
+                                                println!("event_id={}, tx={:?}", sub_event.event_id(), tx);
                                             }
                                         }
                                     }
-
-                                    let task = SubscribeTask::from(&sub_event);
-                                    let task_id = task.task_id.clone();
-                                    let value = json!(task);
-                                    let message = RocksMsg::new(RocksMethod::Put, task_id.clone(), Some(Value::String(value.to_string())));
-                                    let _ = rocks_channel.lock().unwrap().send(message);
-
-                                    sub_event.curr_height += 1;
+                                    Self::sync_event(sub_event, &rocks_channel);
                                 } else {
-                                    let err = map.get("error").unwrap().as_object().unwrap();
-                                    let err_code = err.get("code").unwrap().as_i64().unwrap();
-                                    let err_msg = err.get("data").unwrap().as_str().unwrap().to_string();
-                                    if status.is_server_error() {
-                                        if err_code == -32603 {
-                                            println!("waiting for next block...");
-                                        } else {
-                                            sub_event.handle_err(&rocks_channel, err_msg);
-                                        }
-                                    } else if status == reqwest::StatusCode::NOT_FOUND {
-                                        sub_event.handle_err(&rocks_channel, err_msg);
+                                    let err_msg = String::from(body.get("error").unwrap().as_str().unwrap());
+                                    if err_msg.starts_with("requested block height") {
+                                        println!("waiting for next block...");
                                     } else {
-                                        sub_event.err(&rocks_channel, err_msg);
+                                        sub_event.handle_err(&rocks_channel, err_msg);
                                     }
                                 }
                             }
