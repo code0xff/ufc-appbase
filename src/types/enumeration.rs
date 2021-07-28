@@ -19,7 +19,7 @@ macro_rules! enumeration {
                 }
             }
 
-            fn find(value: &str) -> Option<$enum> {
+            fn find(value: &str) -> Option<Self> {
                 match value {
                      $($values => Some($enum::$types),)*
                     _ => None,
