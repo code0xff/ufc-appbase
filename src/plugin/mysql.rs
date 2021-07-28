@@ -5,7 +5,7 @@ use mysql::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::enumeration;
+use crate::{message, enumeration};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::types::enumeration::Enumeration;
 
@@ -17,25 +17,7 @@ pub struct MySqlPlugin {
 
 type MySqlPool = Arc<Mutex<Pool>>;
 
-#[derive(Serialize, Deserialize)]
-pub struct MySqlMsg {
-    method: String,
-    id: Option<Value>,
-    value: Option<Value>,
-}
-
-impl MySqlMsg {
-    pub fn new(method: MySqlMethod, id: Option<Value>, value: Option<Value>) -> Value {
-        let msg = MySqlMsg {
-            method: method.value(),
-            id,
-            value,
-        };
-        json!(msg)
-    }
-}
-
-enumeration!(MySqlMethod; {Insert: "insert"}, {Update: "update"}, {Delete: "delete"});
+message!((MySqlMsg; {id: Value}, {value: Value}); (MySqlMethod; {Insert: "insert"}, {Update: "update"}, {Delete: "delete"}));
 
 appbase_plugin_requires!(MySqlPlugin; JsonRpcPlugin);
 

@@ -10,7 +10,7 @@ use jsonrpc_core::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use crate::{enumeration, get_object, get_str, get_string};
+use crate::{enumeration, get_object, get_str, get_string, message};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::plugin::rocks::{RocksMethod, RocksMsg, RocksPlugin};
 use crate::types::channel::MultiChannel;
@@ -89,7 +89,7 @@ impl TendermintPlugin {
         let task = SubscribeTask::new(&sub_event);
         let task_id = task.task_id.clone();
         let value = json!(task);
-        let message = RocksMsg::new(RocksMethod::Put, task_id.clone(), Some(Value::String(value.to_string())));
+        let message = RocksMsg::new(RocksMethod::Put, task_id.clone(), Value::String(value.to_string()));
         let _ = rocks_channel.lock().unwrap().send(message);
 
         sub_event.curr_height += 1;
@@ -98,23 +98,7 @@ impl TendermintPlugin {
 
 type SubscribeEvents = Arc<FutureMutex<HashMap<String, SubscribeEvent>>>;
 
-#[derive(Serialize, Deserialize)]
-pub struct TendermintMsg {
-    method: String,
-    value: Value,
-}
-
-impl TendermintMsg {
-    pub fn new(method: TendermintMethod, value: Value) -> Value {
-        let msg = TendermintMsg {
-            method: method.value(),
-            value,
-        };
-        json!(msg)
-    }
-}
-
-enumeration!(TendermintMethod; {Subscribe: "subscribe"}, {Unsubscribe: "unsubscribe"});
+message!((TendermintMsg; {value: Value}); (TendermintMethod; {Subscribe: "subscribe"}, {Unsubscribe: "unsubscribe"}));
 
 appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, RocksPlugin);
 
@@ -163,14 +147,14 @@ impl Plugin for TendermintPlugin {
                             let new_task = SubscribeTask::new(&new_event);
                             let task_id = new_task.task_id.clone();
                             let value = json!(new_task);
-                            let message = RocksMsg::new(RocksMethod::Put, task_id.clone(), Some(Value::String(value.to_string())));
+                            let message = RocksMsg::new(RocksMethod::Put, task_id.clone(), Value::String(value.to_string()));
                             let _ = rocks_channel.lock().unwrap().send(message);
                         }
                         TendermintMethod::Unsubscribe => {
                             let task_id = get_string!(params; "task_id");
                             sub_events_lock.remove(&task_id);
 
-                            let rocks_msg = RocksMsg::new(RocksMethod::Delete, task_id.clone(), None);
+                            let rocks_msg = RocksMsg::new(RocksMethod::Delete, task_id.clone(), Value::Null);
                             let _ = rocks_channel.lock().unwrap().send(rocks_msg);
                         }
                     };
@@ -233,13 +217,12 @@ impl Plugin for TendermintPlugin {
                                                     let block = get_object!(body; "block");
                                                     let header = block.get("header").unwrap();
 
-                                                    println!("event_id={}, header={:?}", sub_event.event_id(), header);
+                                                    println!("event_id={}, header={}", sub_event.event_id(), header.to_string());
                                                 }
                                                 SubscribeTarget::Tx => {
                                                     let txs = body.get("txs").unwrap().as_array().unwrap();
-                                                    for tx_val in txs.iter() {
-                                                        let tx = tx_val.as_object().unwrap();
-                                                        println!("event_id={}, tx={:?}", sub_event.event_id(), tx);
+                                                    for tx in txs.iter() {
+                                                        println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
                                                     }
                                                 }
                                             }
