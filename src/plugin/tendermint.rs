@@ -233,13 +233,12 @@ impl Plugin for TendermintPlugin {
                                                     let block = get_object!(body; "block");
                                                     let header = block.get("header").unwrap();
 
-                                                    println!("event_id={}, header={:?}", sub_event.event_id(), header);
+                                                    println!("event_id={}, header={}", sub_event.event_id(), header.to_string());
                                                 }
                                                 SubscribeTarget::Tx => {
                                                     let txs = body.get("txs").unwrap().as_array().unwrap();
-                                                    for tx_val in txs.iter() {
-                                                        let tx = tx_val.as_object().unwrap();
-                                                        println!("event_id={}, tx={:?}", sub_event.event_id(), tx);
+                                                    for tx in txs.iter() {
+                                                        println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
                                                     }
                                                 }
                                             }
