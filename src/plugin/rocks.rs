@@ -6,10 +6,11 @@ use rocksdb::{DB, DBWithThreadMode, SingleThreaded};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
+use crate::{enumeration, get_str};
 use crate::libs::serialize;
 use crate::plugin::jsonrpc::JsonRpcPlugin;
-use crate::validation::{find_by_key, get_task};
 use crate::types::enumeration::Enumeration;
+use crate::validation::{find_by_key, get_task};
 
 pub struct RocksPlugin {
     base: PluginBase,
@@ -35,27 +36,7 @@ impl RocksMsg {
     }
 }
 
-pub enum RocksMethod {
-    Put,
-    Delete,
-}
-
-impl Enumeration for RocksMethod {
-    fn value(&self) -> String {
-        match self {
-            RocksMethod::Put => String::from("put"),
-            RocksMethod::Delete => String::from("delete"),
-        }
-    }
-
-    fn find(name: &str) -> Option<Self> {
-        match name {
-            "put" => Some(RocksMethod::Put),
-            "delete" => Some(RocksMethod::Delete),
-            _ => None
-        }
-    }
-}
+enumeration!(RocksMethod; {Put: "put"}, {Delete: "delete"});
 
 type RocksDB = Arc<Mutex<DBWithThreadMode<SingleThreaded>>>;
 
@@ -83,7 +64,7 @@ impl RocksPlugin {
         let result = db_lock.get(key.as_bytes()).unwrap();
         match result {
             None => {
-                Value::Object(Map::new())
+                Value::Null
             }
             Some(value) => {
                 Value::Object(serde_json::from_str(String::from_utf8(value).unwrap().as_str()).unwrap())
@@ -143,7 +124,7 @@ impl Plugin for RocksPlugin {
             if verified.is_err() {
                 return Box::new(futures::future::ready(Ok(Value::String(verified.unwrap_err()))));
             }
-            let key = params.get("key").unwrap().as_str().unwrap();
+            let key = get_str!(params; "key");
             let value = Self::find_by_key(&db, key);
             Box::new(futures::future::ready(Ok(value)))
         });
@@ -164,12 +145,12 @@ impl Plugin for RocksPlugin {
                     let method = RocksMethod::find(data.get("method").unwrap().as_str().unwrap()).unwrap();
                     match method {
                         RocksMethod::Put => {
-                            let key = data.get("key").unwrap().as_str().unwrap();
-                            let val = data.get("value").unwrap().as_str().unwrap();
+                            let key = get_str!(data; "key");
+                            let val = get_str!(data; "value");
                             let _ = db_lock.put(key.as_bytes(), val.as_bytes());
                         }
                         RocksMethod::Delete => {
-                            let key = data.get("key").unwrap().as_str().unwrap();
+                            let key = get_str!(data; "key");
                             let _ = db_lock.delete(key.as_bytes());
                         }
                     }

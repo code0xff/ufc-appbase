@@ -5,6 +5,7 @@ use mysql::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::enumeration;
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::types::enumeration::Enumeration;
 
@@ -34,30 +35,7 @@ impl MySqlMsg {
     }
 }
 
-pub enum MySqlMethod {
-    Insert,
-    Update,
-    Delete,
-}
-
-impl Enumeration for MySqlMethod {
-    fn value(&self) -> String {
-        match self {
-            MySqlMethod::Insert => String::from("insert"),
-            MySqlMethod::Update => String::from("update"),
-            MySqlMethod::Delete => String::from("delete"),
-        }
-    }
-
-    fn find(name: &str) -> Option<Self> {
-        match name {
-            "insert" => Some(MySqlMethod::Insert),
-            "update" => Some(MySqlMethod::Update),
-            "delete" => Some(MySqlMethod::Delete),
-            _ => None,
-        }
-    }
-}
+enumeration!(MySqlMethod; {Insert: "insert"}, {Update: "update"}, {Delete: "delete"});
 
 appbase_plugin_requires!(MySqlPlugin; JsonRpcPlugin);
 

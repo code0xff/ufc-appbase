@@ -10,6 +10,7 @@ use jsonrpc_core::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
+use crate::{enumeration, get_object, get_str, get_string};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::plugin::rocks::{RocksMethod, RocksMsg, RocksPlugin};
 use crate::types::channel::MultiChannel;
@@ -62,7 +63,7 @@ impl TendermintPlugin {
             let tm_msg = TendermintMsg::new(TendermintMethod::Unsubscribe, Value::Object(params.clone()));
             let _ = tm_channel.lock().unwrap().send(tm_msg);
 
-            let task_id = params.get("task_id").unwrap().as_str().unwrap();
+            let task_id = get_str!(params; "task_id");
             Box::new(futures::future::ready(Ok(Value::String(format!("unsubscription requested! task_id={}", task_id)))))
         });
     }
@@ -72,20 +73,20 @@ impl TendermintPlugin {
         let mut rocks_plugin = rocks_plugin_handle.lock().unwrap();
         let rocks = rocks_plugin.downcast_mut::<RocksPlugin>().unwrap();
         let raw_tasks: Value = rocks.find_by_prefix("task:tendermint:");
-        let sub_blocks = Arc::clone(self.sub_events.as_ref().unwrap());
+        let sub_events = Arc::clone(self.sub_events.as_ref().unwrap());
         raw_tasks.as_array().unwrap().iter()
-            .for_each(|val| {
-                let task = val.as_object().unwrap();
-                let block = SubscribeEvent::from(task);
-                if block.is_workable() {
-                    let mut sub_blocks_lock = sub_blocks.try_lock().unwrap();
-                    sub_blocks_lock.insert(block.task_id.clone(), block);
+            .for_each(|raw_task| {
+                let task = raw_task.as_object().unwrap();
+                let event = SubscribeEvent::from(task);
+                if event.is_workable() {
+                    let mut sub_events_lock = sub_events.try_lock().unwrap();
+                    sub_events_lock.insert(event.task_id.clone(), event);
                 }
             });
     }
 
     fn sync_event(sub_event: &mut SubscribeEvent, rocks_channel: &ChannelHandle) {
-        let task = SubscribeTask::from(&sub_event);
+        let task = SubscribeTask::new(&sub_event);
         let task_id = task.task_id.clone();
         let value = json!(task);
         let message = RocksMsg::new(RocksMethod::Put, task_id.clone(), Some(Value::String(value.to_string())));
@@ -113,27 +114,7 @@ impl TendermintMsg {
     }
 }
 
-pub enum TendermintMethod {
-    Subscribe,
-    Unsubscribe,
-}
-
-impl Enumeration for TendermintMethod {
-    fn value(&self) -> String {
-        match self {
-            TendermintMethod::Subscribe => String::from("subscribe"),
-            TendermintMethod::Unsubscribe => String::from("unsubscribe"),
-        }
-    }
-
-    fn find(method: &str) -> Option<Self> {
-        match method {
-            "subscribe" => Some(TendermintMethod::Subscribe),
-            "unsubscribe" => Some(TendermintMethod::Unsubscribe),
-            _ => None
-        }
-    }
-}
+enumeration!(TendermintMethod; {Subscribe: "subscribe"}, {Unsubscribe: "unsubscribe"});
 
 appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, RocksPlugin);
 
@@ -171,22 +152,22 @@ impl Plugin for TendermintPlugin {
                 thread::sleep(Duration::from_secs(1));
                 let mut sub_events_lock = sub_events.lock().await;
                 if let Ok(message) = mon_lock.try_recv() {
-                    let map = message.as_object().unwrap();
-                    let method = TendermintMethod::find(map.get("method").unwrap().as_str().unwrap()).unwrap();
-                    let params = map.get("value").unwrap().as_object().unwrap();
+                    let message_map = message.as_object().unwrap();
+                    let method = TendermintMethod::find(get_str!(message_map; "method")).unwrap();
+                    let params = get_object!(message_map; "value");
                     match method {
                         TendermintMethod::Subscribe => {
                             let new_event = SubscribeEvent::new(String::from("tendermint"), &params);
                             sub_events_lock.insert(new_event.task_id.clone(), new_event.clone());
 
-                            let new_task = SubscribeTask::from(&new_event);
+                            let new_task = SubscribeTask::new(&new_event);
                             let task_id = new_task.task_id.clone();
                             let value = json!(new_task);
                             let message = RocksMsg::new(RocksMethod::Put, task_id.clone(), Some(Value::String(value.to_string())));
                             let _ = rocks_channel.lock().unwrap().send(message);
                         }
                         TendermintMethod::Unsubscribe => {
-                            let task_id = String::from(params.get("task_id").unwrap().as_str().unwrap());
+                            let task_id = get_string!(params; "task_id");
                             sub_events_lock.remove(&task_id);
 
                             let rocks_msg = RocksMsg::new(RocksMethod::Delete, task_id.clone(), None);
@@ -206,15 +187,14 @@ impl Plugin for TendermintPlugin {
                             SubscribeTarget::Tx => {
                                 let node_idx = usize::from(sub_event.node_idx);
                                 let latest_req_url = format!("{}/blocks/latest", sub_event.nodes[node_idx]);
-                                let res_result = reqwest::get(latest_req_url)
-                                    .await;
+                                let res_result = reqwest::get(latest_req_url).await;
                                 if res_result.is_ok() {
                                     let res_body = res_result.unwrap().text().await;
                                     if res_body.is_ok() {
                                         let body: Map<String, Value> = serde_json::from_str(res_body.unwrap().as_str()).unwrap();
-                                        let block = body.get("block").unwrap().as_object().unwrap();
-                                        let header = block.get("header").unwrap().as_object().unwrap();
-                                        let height = header.get("height").unwrap().as_str().unwrap();
+                                        let block = get_object!(body; "block");
+                                        let header = get_object!(block; "header");
+                                        let height = get_str!(header; "height");
                                         let latest_height = u64::from_str(height).unwrap();
                                         if sub_event.curr_height <= latest_height {
                                             let node_index = usize::from(sub_event.node_idx);
@@ -238,36 +218,45 @@ impl Plugin for TendermintPlugin {
                         match res_result {
                             Ok(res) => {
                                 let status = res.status().clone();
-                                let res_body = res
-                                    .text()
-                                    .await
-                                    .unwrap();
-                                let body: Map<String, Value> = serde_json::from_str(res_body.as_str()).unwrap();
-                                if status.is_success() {
-                                    match sub_event.target {
-                                        SubscribeTarget::Block => {
-                                            let block = body.get("block").unwrap().as_object().unwrap();
-                                            let header = block.get("header").unwrap();
-
-                                            println!("event_id={}, header={:?}", sub_event.event_id(), header);
+                                let res_body = res.text().await;
+                                match res_body {
+                                    Ok(body_str) => {
+                                        let parsed_body = serde_json::from_str(body_str.as_str());
+                                        if parsed_body.is_err() {
+                                            println!("parsing error occurred...");
+                                            continue;
                                         }
-                                        SubscribeTarget::Tx => {
-                                            let txs = body.get("txs").unwrap().as_array().unwrap();
-                                            for tx_val in txs.iter() {
-                                                let tx = tx_val.as_object().unwrap();
-                                                println!("event_id={}, tx={:?}", sub_event.event_id(), tx);
+                                        let body: Map<String, Value> = parsed_body.unwrap();
+                                        if status.is_success() {
+                                            match sub_event.target {
+                                                SubscribeTarget::Block => {
+                                                    let block = get_object!(body; "block");
+                                                    let header = block.get("header").unwrap();
+
+                                                    println!("event_id={}, header={:?}", sub_event.event_id(), header);
+                                                }
+                                                SubscribeTarget::Tx => {
+                                                    let txs = body.get("txs").unwrap().as_array().unwrap();
+                                                    for tx_val in txs.iter() {
+                                                        let tx = tx_val.as_object().unwrap();
+                                                        println!("event_id={}, tx={:?}", sub_event.event_id(), tx);
+                                                    }
+                                                }
+                                            }
+                                            Self::sync_event(sub_event, &rocks_channel);
+                                        } else {
+                                            let err_msg = get_string!(body; "error");
+                                            if err_msg.starts_with("requested block height") {
+                                                println!("waiting for next block...");
+                                            } else {
+                                                sub_event.handle_err(&rocks_channel, err_msg);
                                             }
                                         }
                                     }
-                                    Self::sync_event(sub_event, &rocks_channel);
-                                } else {
-                                    let err_msg = String::from(body.get("error").unwrap().as_str().unwrap());
-                                    if err_msg.starts_with("requested block height") {
-                                        println!("waiting for next block...");
-                                    } else {
-                                        sub_event.handle_err(&rocks_channel, err_msg);
+                                    Err(err) => {
+                                        sub_event.handle_err(&rocks_channel, err.to_string());
                                     }
-                                }
+                                };
                             }
                             Err(err) => {
                                 sub_event.handle_err(&rocks_channel, err.to_string());
