@@ -3,10 +3,10 @@ use std::sync::{Arc, Mutex};
 use appbase::*;
 use jsonrpc_core::{Params, serde_from_str};
 use rocksdb::{DB, DBWithThreadMode, SingleThreaded};
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+use serde::{Serialize, Deserialize};
 
-use crate::{enumeration, get_str};
+use crate::{enumeration, get_str, message};
 use crate::libs::serialize;
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::types::enumeration::Enumeration;
@@ -18,25 +18,7 @@ pub struct RocksPlugin {
     monitor: Option<SubscribeHandle>,
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct RocksMsg {
-    method: String,
-    key: String,
-    value: Option<Value>,
-}
-
-impl RocksMsg {
-    pub fn new(method: RocksMethod, key: String, value: Option<Value>) -> Value {
-        let msg = RocksMsg {
-            method: method.value(),
-            key,
-            value,
-        };
-        json!(msg)
-    }
-}
-
-enumeration!(RocksMethod; {Put: "put"}, {Delete: "delete"});
+message!((RocksMsg; {key: String}, {value: Value}); (RocksMethod; {Put: "put"}, {Delete: "delete"}));
 
 type RocksDB = Arc<Mutex<DBWithThreadMode<SingleThreaded>>>;
 

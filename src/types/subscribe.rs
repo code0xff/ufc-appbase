@@ -72,7 +72,7 @@ impl SubscribeEvent {
         println!("{}", err_msg);
         self.status = SubscribeStatus::Error;
         let task = SubscribeTask::from(self, err_msg);
-        let msg = RocksMsg::new(RocksMethod::Put, self.task_id.clone(), Some(Value::String(json!(task).to_string())));
+        let msg = RocksMsg::new(RocksMethod::Put, self.task_id.clone(), Value::String(json!(task).to_string()));
         let _ = rocks_channel.lock().unwrap().send(msg);
     }
 }
