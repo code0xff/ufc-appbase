@@ -10,7 +10,7 @@ use jsonrpc_core::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use crate::{enumeration, get_object, get_str, get_string, message};
+use crate::{enumeration, get_object, get_str, get_string, message, unwrap};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::plugin::rocks::{RocksMethod, RocksMsg, RocksPlugin};
 use crate::types::channel::MultiChannel;
@@ -63,8 +63,13 @@ impl TendermintPlugin {
             let tm_msg = TendermintMsg::new(TendermintMethod::Unsubscribe, Value::Object(params.clone()));
             let _ = tm_channel.lock().unwrap().send(tm_msg);
 
-            let task_id = get_str!(params; "task_id");
-            Box::new(futures::future::ready(Ok(Value::String(format!("unsubscription requested! task_id={}", task_id)))))
+            let task_result = get_str!(&params; "task_id");
+            let result = match task_result {
+                Ok(task_id) => { format!("unsubscription requested! task_id={}", task_id) }
+                Err(err_msg) => { format!("error={}", err_msg) }
+            };
+
+            Box::new(futures::future::ready(Ok(Value::String(result))))
         });
     }
 
@@ -137,8 +142,8 @@ impl Plugin for TendermintPlugin {
                 let mut sub_events_lock = sub_events.lock().await;
                 if let Ok(message) = mon_lock.try_recv() {
                     let message_map = message.as_object().unwrap();
-                    let method = TendermintMethod::find(get_str!(message_map; "method")).unwrap();
-                    let params = get_object!(message_map; "value");
+                    let method = TendermintMethod::find(get_str!(message_map; "method").unwrap()).unwrap();
+                    let params = get_object!(message_map; "value").unwrap();
                     match method {
                         TendermintMethod::Subscribe => {
                             let new_event = SubscribeEvent::new(String::from("tendermint"), &params);
@@ -151,7 +156,7 @@ impl Plugin for TendermintPlugin {
                             let _ = rocks_channel.lock().unwrap().send(message);
                         }
                         TendermintMethod::Unsubscribe => {
-                            let task_id = get_string!(params; "task_id");
+                            let task_id = get_string!(params; "task_id").unwrap();
                             sub_events_lock.remove(&task_id);
 
                             let rocks_msg = RocksMsg::new(RocksMethod::Delete, task_id.clone(), Value::Null);
@@ -176,10 +181,24 @@ impl Plugin for TendermintPlugin {
                                     let res_body = res_result.unwrap().text().await;
                                     if res_body.is_ok() {
                                         let body: Map<String, Value> = serde_json::from_str(res_body.unwrap().as_str()).unwrap();
-                                        let block = get_object!(body; "block");
-                                        let header = get_object!(block; "header");
-                                        let height = get_str!(header; "height");
-                                        let latest_height = u64::from_str(height).unwrap();
+                                        let block = get_object!(&body; "block");
+                                        if block.is_err() {
+                                            println!("{}", block.unwrap_err());
+                                            continue;
+                                        }
+                                        let unwrapped_block = block.unwrap();
+                                        let header = get_object!(&unwrapped_block; "header");
+                                        if header.is_err() {
+                                            println!("{}", header.unwrap_err());
+                                            continue;
+                                        }
+                                        let unwrapped_header = header.unwrap();
+                                        let height = get_str!(&unwrapped_header; "height");
+                                        if height.is_err() {
+                                            println!("{}", height.unwrap_err());
+                                            continue;
+                                        }
+                                        let latest_height = u64::from_str(height.unwrap()).unwrap();
                                         if sub_event.curr_height <= latest_height {
                                             let node_index = usize::from(sub_event.node_idx);
                                             let req_url = format!("{}/txs?page=1&limit=100&tx.height={}", sub_event.nodes[node_index], sub_event.curr_height);
@@ -214,8 +233,12 @@ impl Plugin for TendermintPlugin {
                                         if status.is_success() {
                                             match sub_event.target {
                                                 SubscribeTarget::Block => {
-                                                    let block = get_object!(body; "block");
-                                                    let header = block.get("header").unwrap();
+                                                    let block = get_object!(&body; "block");
+                                                    if block.is_err() {
+                                                        println!("{}", block.unwrap_err());
+                                                        continue;
+                                                    }
+                                                    let header = block.unwrap().get("header").unwrap();
 
                                                     println!("event_id={}, header={}", sub_event.event_id(), header.to_string());
                                                 }
@@ -228,7 +251,7 @@ impl Plugin for TendermintPlugin {
                                             }
                                             Self::sync_event(sub_event, &rocks_channel);
                                         } else {
-                                            let err_msg = get_string!(body; "error");
+                                            let err_msg = get_string!(body; "error").unwrap();
                                             if err_msg.starts_with("requested block height") {
                                                 println!("waiting for next block...");
                                             } else {
