@@ -2,7 +2,7 @@ use appbase::ChannelHandle;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use crate::{enumeration, get_str, get_string, get_string_vec, get_u64};
+use crate::{enumeration, unwrap, get_str, get_string, get_string_vec, get_u64};
 use crate::plugin::rocks::{RocksMethod, RocksMsg};
 use crate::types::enumeration::Enumeration;
 use crate::types::subscribe::SubscribeStatus::Working;
@@ -22,11 +22,12 @@ pub struct SubscribeEvent {
 
 impl SubscribeEvent {
     pub fn new(chain: String, params: &Map<String, Value>) -> Self {
-        let sub_id = get_string!(params; "sub_id");
-        let start_height = get_u64!(params; "start_height");
+        let sub_id = get_string!(params; "sub_id").unwrap();
+        let start_height = get_u64!(params; "start_height").unwrap();
+        let target = get_str!(params; "target").unwrap();
         SubscribeEvent {
-            task_id: format!("task:{}:{}:{}", chain, get_str!(params; "target"), sub_id),
-            target: SubscribeTarget::find(get_str!(params; "target")).unwrap(),
+            task_id: format!("task:{}:{}:{}", chain, target, sub_id),
+            target: SubscribeTarget::find(target).unwrap(),
             chain,
             sub_id,
             start_height,
@@ -39,15 +40,15 @@ impl SubscribeEvent {
 
     pub fn from(params: &Map<String, Value>) -> Self {
         SubscribeEvent {
-            task_id: get_string!(params; "task_id"),
-            target: SubscribeTarget::find(get_str!(params; "target")).unwrap(),
-            chain: get_string!(params; "chain"),
-            sub_id: get_string!(params; "sub_id"),
-            start_height: get_u64!(params; "start_height"),
-            curr_height: get_u64!(params; "curr_height"),
+            task_id: get_string!(params; "task_id").unwrap(),
+            target: SubscribeTarget::find(get_str!(params; "target").unwrap()).unwrap(),
+            chain: get_string!(params; "chain").unwrap(),
+            sub_id: get_string!(params; "sub_id").unwrap(),
+            start_height: get_u64!(params; "start_height").unwrap(),
+            curr_height: get_u64!(params; "curr_height").unwrap(),
             nodes: get_string_vec!(params; "nodes"),
             node_idx: 0,
-            status: SubscribeStatus::find(get_str!(params; "status")).unwrap(),
+            status: SubscribeStatus::find(get_str!(params; "status").unwrap()).unwrap(),
         }
     }
 
@@ -110,7 +111,7 @@ impl SubscribeTask {
     }
 
     pub fn task_id(chain: &str, params: &Map<String, Value>) -> String {
-        format!("task:{}:{}:{}", chain, get_str!(params; "target"), get_str!(params; "sub_id"))
+        format!("task:{}:{}:{}", chain, get_str!(params; "target").unwrap(), get_str!(params; "sub_id").unwrap())
     }
 }
 
