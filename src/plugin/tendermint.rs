@@ -8,32 +8,40 @@ use appbase::*;
 use dotenv::dotenv;
 use futures::lock::Mutex as FutureMutex;
 use jsonrpc_core::*;
+use rocksdb::{DBWithThreadMode, SingleThreaded};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use crate::{enumeration, message};
 use crate::libs::mysql::query;
+use crate::libs::rocks::{delete_static, get_by_prefix_static, get_static, put_static};
 use crate::libs::serde::{get_object, get_str, get_string, pick};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::plugin::mysql::{MySqlMethod, MySqlMsg, MySqlPlugin};
 use crate::plugin::rabbit::RabbitPlugin;
-use crate::plugin::rocks::{RocksMethod, RocksMsg, RocksPlugin};
 use crate::types::channel::MultiChannel;
 use crate::types::enumeration::Enumeration;
 use crate::types::subscribe::{SubscribeEvent, SubscribeTarget, SubscribeTask};
-use crate::validation::{subscribe, unsubscribe};
+use crate::validation::{get_task, subscribe, unsubscribe};
 
 pub struct TendermintPlugin {
     base: PluginBase,
+    tm_db: Option<RocksDB>,
     sub_events: Option<SubscribeEvents>,
     channels: Option<MultiChannel>,
     monitor: Option<SubscribeHandle>,
 }
 
+const CHAIN: &str = "tendermint";
+const TASK_PREFIX: &str = "task:tendermint";
+
+type RocksDB = Arc<DBWithThreadMode<SingleThreaded>>;
+
 impl TendermintPlugin {
     fn init(&mut self) {
         self.sub_events = Some(Arc::new(FutureMutex::new(HashMap::new())));
-        let channels = MultiChannel::new(vec!(String::from("tendermint"), String::from("rocks"), String::from("mysql"), String::from("rabbit")));
+        self.tm_db = Some(Arc::new(DBWithThreadMode::open_default("tendermint").unwrap()));
+        let channels = MultiChannel::new(vec!(String::from("tendermint"), String::from("mysql"), String::from("rabbit")));
         self.channels = Some(channels.to_owned());
         self.monitor = Some(app::subscribe_channel(String::from("tendermint")));
     }
@@ -44,6 +52,7 @@ impl TendermintPlugin {
         let jsonrpc = jsonrpc_plugin.downcast_mut::<JsonRpcPlugin>().unwrap();
 
         let tm_channel = self.channels.as_ref().unwrap().get("tendermint");
+        let tm_db = Arc::clone(self.tm_db.as_ref().unwrap());
         jsonrpc.add_method(String::from("tm_subscribe"), move |params: Params| {
             let params: Map<String, Value> = params.parse().unwrap();
             let verified = subscribe::verify(&params);
@@ -52,12 +61,23 @@ impl TendermintPlugin {
             }
             let message = TendermintMsg::new(TendermintMethod::Subscribe, Value::Object(params.clone()));
             let _ = tm_channel.lock().unwrap().send(message);
+            let task_id = SubscribeTask::task_id(CHAIN, &params);
 
-            let task_id = SubscribeTask::task_id("tendermint", &params);
-            Box::new(futures::future::ready(Ok(Value::String(format!("subscription requested! task_id={}", task_id)))))
+            let value = get_static(&tm_db, task_id.as_str());
+            if value.is_null() {
+                let new_task = SubscribeTask::new(CHAIN, &params);
+                let task_id = new_task.task_id.clone();
+                let value = json!(new_task);
+                put_static(&tm_db, task_id.as_str(), value.to_string().as_str());
+
+                Box::new(futures::future::ready(Ok(Value::String(format!("subscription requested! task_id={}", task_id)))))
+            } else {
+                Box::new(futures::future::ready(Ok(Value::String(format!("already exist task! task_id={}", task_id)))))
+            }
         });
 
         let tm_channel = self.channels.as_ref().unwrap().get("tendermint");
+        let tm_db = Arc::clone(self.tm_db.as_ref().unwrap());
         jsonrpc.add_method(String::from("tm_unsubscribe"), move |params: Params| {
             let params: Map<String, Value> = params.parse().unwrap();
             let verified = unsubscribe::verify(&params);
@@ -68,21 +88,39 @@ impl TendermintPlugin {
             let tm_msg = TendermintMsg::new(TendermintMethod::Unsubscribe, Value::Object(params.clone()));
             let _ = tm_channel.lock().unwrap().send(tm_msg);
 
-            let task_result = get_str(&params, "task_id");
-            let result = match task_result {
-                Ok(task_id) => { format!("unsubscription requested! task_id={}", task_id) }
-                Err(err_msg) => { format!("error={}", err_msg) }
-            };
+            let task_id = get_str(&params, "task_id").unwrap();
+            let value = get_static(&tm_db, task_id);
+            if value.is_null() {
+                Box::new(futures::future::ready(Ok(Value::String(format!("task does not exist! task_id={}", task_id)))))
+            } else {
+                delete_static(&tm_db, task_id);
+                Box::new(futures::future::ready(Ok(Value::String(format!("unsubscription requested! task_id={}", task_id)))))
+            }
+        });
 
-            Box::new(futures::future::ready(Ok(Value::String(result))))
+        let tm_db = Arc::clone(self.tm_db.as_ref().unwrap());
+        jsonrpc.add_method(String::from("tm_get_tasks"), move |params: Params| {
+            let params: Map<String, Value> = params.parse().unwrap();
+            let verified = get_task::verify(&params);
+            if verified.is_err() {
+                return Box::new(futures::future::ready(Ok(Value::String(verified.unwrap_err()))));
+            }
+
+            let prefix = match params.get("task_id") {
+                None => {
+                    TASK_PREFIX
+                }
+                Some(task_id) => {
+                    task_id.as_str().unwrap()
+                }
+            };
+            let tasks = get_by_prefix_static(&tm_db, prefix);
+            Box::new(futures::future::ready(Ok(tasks)))
         });
     }
 
     fn load_tasks(&self) {
-        let rocks_plugin_handle = app::get_plugin::<RocksPlugin>();
-        let mut rocks_plugin = rocks_plugin_handle.lock().unwrap();
-        let rocks = rocks_plugin.downcast_mut::<RocksPlugin>().unwrap();
-        let raw_tasks: Value = rocks.find_by_prefix("task:tendermint:");
+        let raw_tasks = get_by_prefix_static(self.tm_db.as_ref().unwrap(), TASK_PREFIX);
         let sub_events = Arc::clone(self.sub_events.as_ref().unwrap());
         raw_tasks.as_array().unwrap().iter()
             .for_each(|raw_task| {
@@ -95,14 +133,19 @@ impl TendermintPlugin {
             });
     }
 
-    fn sync_event(sub_event: &mut SubscribeEvent, rocks_channel: &ChannelHandle) {
-        let task = SubscribeTask::new(&sub_event);
+    fn sync_event(rocksdb: &RocksDB, sub_event: &mut SubscribeEvent) {
+        let task = SubscribeTask::from(&sub_event, String::from(""));
         let task_id = task.task_id.clone();
         let value = json!(task);
-        let message = RocksMsg::new(RocksMethod::Put, task_id.clone(), Value::String(value.to_string()));
-        let _ = rocks_channel.lock().unwrap().send(message);
+        let _ = rocksdb.put(task_id.as_str(), value.to_string().as_str());
 
         sub_event.curr_height += 1;
+    }
+
+    fn error_handler(tm_db: &RocksDB, sub_event: &mut SubscribeEvent, err_msg: String) {
+        sub_event.handle_err(err_msg.clone());
+        let task = SubscribeTask::from(sub_event, err_msg);
+        put_static(&tm_db, task.task_id.as_str(), json!(task).to_string().as_str());
     }
 }
 
@@ -110,7 +153,7 @@ type SubscribeEvents = Arc<FutureMutex<HashMap<String, SubscribeEvent>>>;
 
 message!((TendermintMsg; {value: Value}); (TendermintMethod; {Subscribe: "subscribe"}, {Unsubscribe: "unsubscribe"}));
 
-appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, RocksPlugin);
+appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin);
 
 impl Plugin for TendermintPlugin {
     appbase_plugin_default!(TendermintPlugin);
@@ -118,6 +161,7 @@ impl Plugin for TendermintPlugin {
     fn new() -> Self {
         TendermintPlugin {
             base: PluginBase::new(),
+            tm_db: None,
             sub_events: None,
             channels: None,
             monitor: None,
@@ -139,9 +183,9 @@ impl Plugin for TendermintPlugin {
         }
         let monitor = Arc::clone(self.monitor.as_ref().unwrap());
         let sub_events = Arc::clone(self.sub_events.as_ref().unwrap());
-        let rocks_channel = self.channels.as_ref().unwrap().get("rocks");
         let mysql_channel = self.channels.as_ref().unwrap().get("mysql");
         let rabbit_channel = self.channels.as_ref().unwrap().get("rabbit");
+        let tm_db = Arc::clone(self.tm_db.as_ref().unwrap());
         tokio::spawn(async move {
             let mut mon_lock = monitor.lock().await;
             loop {
@@ -153,21 +197,14 @@ impl Plugin for TendermintPlugin {
                     let params = get_object(message_map, "value").unwrap();
                     match method {
                         TendermintMethod::Subscribe => {
-                            let new_event = SubscribeEvent::new(String::from("tendermint"), &params);
+                            let new_event = SubscribeEvent::new(CHAIN, &params);
                             sub_events_lock.insert(new_event.task_id.clone(), new_event.clone());
-
-                            let new_task = SubscribeTask::new(&new_event);
-                            let task_id = new_task.task_id.clone();
-                            let value = json!(new_task);
-                            let message = RocksMsg::new(RocksMethod::Put, task_id.clone(), Value::String(value.to_string()));
-                            let _ = rocks_channel.lock().unwrap().send(message);
                         }
                         TendermintMethod::Unsubscribe => {
                             let task_id = get_string(&params, "task_id").unwrap();
                             sub_events_lock.remove(&task_id);
 
-                            let rocks_msg = RocksMsg::new(RocksMethod::Delete, task_id.clone(), Value::Null);
-                            let _ = rocks_channel.lock().unwrap().send(rocks_msg);
+                            delete_static(&tm_db, task_id.as_str());
                         }
                     };
                 }
@@ -215,11 +252,11 @@ impl Plugin for TendermintPlugin {
                                             continue;
                                         }
                                     } else {
-                                        sub_event.handle_err(&rocks_channel, res_body.unwrap_err().to_string());
+                                        Self::error_handler(&tm_db, sub_event, res_body.unwrap_err().to_string());
                                         continue;
                                     }
                                 } else {
-                                    sub_event.handle_err(&rocks_channel, res_result.unwrap_err().to_string());
+                                    Self::error_handler(&tm_db, sub_event, res_result.unwrap_err().to_string());
                                     continue;
                                 }
                             }
@@ -278,23 +315,23 @@ impl Plugin for TendermintPlugin {
                                                     }
                                                 }
                                             }
-                                            Self::sync_event(sub_event, &rocks_channel);
+                                            Self::sync_event(&tm_db, sub_event);
                                         } else {
                                             let err_msg = get_string(&body, "error").unwrap();
                                             if err_msg.starts_with("requested block height") {
                                                 println!("waiting for next block...");
                                             } else {
-                                                sub_event.handle_err(&rocks_channel, err_msg);
+                                                Self::error_handler(&tm_db, sub_event, err_msg);
                                             }
                                         }
                                     }
                                     Err(err) => {
-                                        sub_event.handle_err(&rocks_channel, err.to_string());
+                                        Self::error_handler(&tm_db, sub_event, err.to_string());
                                     }
                                 };
                             }
                             Err(err) => {
-                                sub_event.handle_err(&rocks_channel, err.to_string());
+                                Self::error_handler(&tm_db, sub_event, err.to_string());
                             }
                         }
                     }
