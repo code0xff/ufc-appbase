@@ -1,13 +1,19 @@
 use serde_json::{Map, Value};
 
-use crate::{verify_arr, verify_num, verify_str};
-use crate::types::subscribe::SubscribeTarget;
 use crate::types::enumeration::Enumeration;
+use crate::types::subscribe::SubscribeTarget;
+use crate::validation::verify::verify_default;
 
 pub fn verify(params: &Map<String, Value>) -> Result<(), String> {
-    verify_str!(params; "target", "sub_id");
-    verify_num!(params; "start_height");
-    verify_arr!(params; "nodes");
+    let verified = verify_default(params, vec![
+        ("target", "string"),
+        ("sub_id", "string"),
+        ("start_height", "u64"),
+        ("nodes", "array"),
+    ]);
+    if verified.is_err() {
+        return Err(verified.unwrap_err());
+    }
     if !SubscribeTarget::valid(params.get("target").unwrap().as_str().unwrap()) {
         return Err(String::from("matched target does not exit"));
     }
@@ -16,7 +22,8 @@ pub fn verify(params: &Map<String, Value>) -> Result<(), String> {
 
 #[cfg(test)]
 mod subscribe_test {
-    use serde_json::{Map, json};
+    use serde_json::{json, Map};
+
     use crate::validation::subscribe::verify;
 
     #[test]

@@ -1,8 +1,7 @@
+use std::{env, thread};
 use std::collections::HashMap;
-use std::env;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
 
 use appbase::*;
@@ -13,16 +12,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use crate::{enumeration, message};
-use crate::libs::mysql_helper::query;
-use crate::libs::serde_helper::{get_object, get_str, get_string, pick};
+use crate::libs::mysql::query;
+use crate::libs::serde::{get_object, get_str, get_string, pick};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
-use crate::plugin::mysql::{MySqlMethod, MySqlMsg};
+use crate::plugin::mysql::{MySqlMethod, MySqlMsg, MySqlPlugin};
+use crate::plugin::rabbit::RabbitPlugin;
 use crate::plugin::rocks::{RocksMethod, RocksMsg, RocksPlugin};
 use crate::types::channel::MultiChannel;
 use crate::types::enumeration::Enumeration;
 use crate::types::subscribe::{SubscribeEvent, SubscribeTarget, SubscribeTask};
 use crate::validation::{subscribe, unsubscribe};
-use crate::plugin::rabbit::RabbitPlugin;
 
 pub struct TendermintPlugin {
     base: PluginBase,
@@ -111,7 +110,7 @@ type SubscribeEvents = Arc<FutureMutex<HashMap<String, SubscribeEvent>>>;
 
 message!((TendermintMsg; {value: Value}); (TendermintMethod; {Subscribe: "subscribe"}, {Unsubscribe: "unsubscribe"}));
 
-appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, RocksPlugin, );
+appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, RocksPlugin);
 
 impl Plugin for TendermintPlugin {
     appbase_plugin_default!(TendermintPlugin);
@@ -251,8 +250,7 @@ impl Plugin for TendermintPlugin {
                                                     println!("event_id={}, header={}", sub_event.event_id(), header.to_string());
 
                                                     dotenv().ok();
-                                                    if bool::from_str(env::var("TM_BLOCK_MYSQL_SYNC").unwrap().as_str()).unwrap() {
-                                                    }
+                                                    if bool::from_str(env::var("TM_BLOCK_MYSQL_SYNC").unwrap().as_str()).unwrap() {}
                                                     if bool::from_str(env::var("TM_BLOCK_RABBIT_PUBLISH").unwrap().as_str()).unwrap() {
                                                         let _ = rabbit_channel.lock().unwrap().send(Value::String(header.to_string()));
                                                     }

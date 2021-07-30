@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use crate::enumeration;
-use crate::libs::serde_helper::{get_str, get_string, get_string_vec, get_u64};
+use crate::libs::serde::{get_str, get_string, get_string_vec, get_u64};
 use crate::plugin::rocks::{RocksMethod, RocksMsg};
 use crate::types::enumeration::Enumeration;
 use crate::types::subscribe::SubscribeStatus::Working;
@@ -124,7 +124,7 @@ mod subscribe_test {
     use appbase::*;
     use serde_json::{json, Map};
 
-    use crate::types::subscribe::{SubscribeEvent, SubscribeStatus, SubscribeTask};
+    use crate::types::subscribe::{SubscribeEvent, SubscribeStatus};
 
     #[test]
     fn subscribe_event_task_id_test() {
@@ -189,7 +189,6 @@ mod subscribe_test {
         let rocks_channel = app::get_channel(String::from("rocks"));
 
         let mut subscribe_event = SubscribeEvent::new(String::from("tendermint"), &params);
-        let prev_node_idx = subscribe_event.node_idx;
         subscribe_event.handle_err(&rocks_channel, String::from("error_test"));
 
         assert_eq!(SubscribeStatus::Error, subscribe_event.status);
