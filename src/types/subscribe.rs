@@ -102,23 +102,6 @@ impl SubscribeTask {
         }
     }
 
-    pub fn new(chain: &str, params: &Map<String, Value>) -> Self {
-        let sub_id = get_string(params, "sub_id").unwrap();
-        let start_height = get_u64(params, "start_height").unwrap();
-        let target = get_str(params, "target").unwrap();
-        SubscribeTask {
-            task_id: format!("task:{}:{}:{}", chain, target, sub_id),
-            target: String::from(target),
-            chain: String::from(chain),
-            sub_id,
-            start_height,
-            curr_height: start_height,
-            nodes: get_string_vec(params, "nodes"),
-            status: SubscribeStatus::Working.value(),
-            err_msg: String::from(""),
-        }
-    }
-
     pub fn task_id(chain: &str, params: &Map<String, Value>) -> String {
         format!("task:{}:{}:{}", chain, get_str(params, "target").unwrap(), get_str(params, "sub_id").unwrap())
     }

@@ -20,14 +20,6 @@ pub fn get_static(rocksdb: &RocksDB, key: &str) -> Value {
     }
 }
 
-pub fn put_static(rocksdb: &RocksDB, key: &str, value: &str) {
-    let _ = rocksdb.put(key.as_bytes(), value.as_bytes());
-}
-
-pub fn delete_static(rocksdb: &RocksDB, key: &str) {
-    let _ = rocksdb.delete(key.as_bytes());
-}
-
 pub fn get_by_prefix_static(rocksdb: &RocksDB, prefix: &str) -> Value {
     let mut iter = rocksdb.raw_iterator();
     iter.seek(prefix.as_bytes());
