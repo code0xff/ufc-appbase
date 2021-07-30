@@ -6,7 +6,8 @@ use rocksdb::{DB, DBWithThreadMode, SingleThreaded};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use crate::{enumeration, get_str, message, unwrap};
+use crate::{enumeration, message};
+use crate::libs::serde_helper::get_str;
 use crate::libs::serialize;
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::types::enumeration::Enumeration;
@@ -106,7 +107,7 @@ impl Plugin for RocksPlugin {
             if verified.is_err() {
                 return Box::new(futures::future::ready(Ok(Value::String(verified.unwrap_err()))));
             }
-            let key = get_str!(&params; "key").unwrap();
+            let key = get_str(&params, "key").unwrap();
             let value = Self::find_by_key(&db, key);
             Box::new(futures::future::ready(Ok(value)))
         });
@@ -127,12 +128,12 @@ impl Plugin for RocksPlugin {
                     let method = RocksMethod::find(data.get("method").unwrap().as_str().unwrap()).unwrap();
                     match method {
                         RocksMethod::Put => {
-                            let key = get_str!(data; "key").unwrap();
-                            let val = get_str!(data; "value").unwrap();
+                            let key = get_str(data, "key").unwrap();
+                            let val = get_str(data, "value").unwrap();
                             let _ = db_lock.put(key.as_bytes(), val.as_bytes());
                         }
                         RocksMethod::Delete => {
-                            let key = get_str!(data; "key").unwrap();
+                            let key = get_str(data, "key").unwrap();
                             let _ = db_lock.delete(key.as_bytes());
                         }
                     }

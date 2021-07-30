@@ -1,22 +1,28 @@
 use std::collections::HashMap;
+use std::env;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
 use appbase::*;
+use dotenv::dotenv;
 use futures::lock::Mutex as FutureMutex;
 use jsonrpc_core::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use crate::{enumeration, get_object, get_str, get_string, message, unwrap};
+use crate::{enumeration, message};
+use crate::libs::mysql_helper::query;
+use crate::libs::serde_helper::{get_object, get_str, get_string, pick};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
+use crate::plugin::mysql::{MySqlMethod, MySqlMsg};
 use crate::plugin::rocks::{RocksMethod, RocksMsg, RocksPlugin};
 use crate::types::channel::MultiChannel;
 use crate::types::enumeration::Enumeration;
 use crate::types::subscribe::{SubscribeEvent, SubscribeTarget, SubscribeTask};
 use crate::validation::{subscribe, unsubscribe};
+use crate::plugin::rabbit::RabbitPlugin;
 
 pub struct TendermintPlugin {
     base: PluginBase,
@@ -28,7 +34,7 @@ pub struct TendermintPlugin {
 impl TendermintPlugin {
     fn init(&mut self) {
         self.sub_events = Some(Arc::new(FutureMutex::new(HashMap::new())));
-        let channels = MultiChannel::new(vec!(String::from("tendermint"), String::from("rocks")));
+        let channels = MultiChannel::new(vec!(String::from("tendermint"), String::from("rocks"), String::from("mysql"), String::from("rabbit")));
         self.channels = Some(channels.to_owned());
         self.monitor = Some(app::subscribe_channel(String::from("tendermint")));
     }
@@ -63,7 +69,7 @@ impl TendermintPlugin {
             let tm_msg = TendermintMsg::new(TendermintMethod::Unsubscribe, Value::Object(params.clone()));
             let _ = tm_channel.lock().unwrap().send(tm_msg);
 
-            let task_result = get_str!(&params; "task_id");
+            let task_result = get_str(&params, "task_id");
             let result = match task_result {
                 Ok(task_id) => { format!("unsubscription requested! task_id={}", task_id) }
                 Err(err_msg) => { format!("error={}", err_msg) }
@@ -105,7 +111,7 @@ type SubscribeEvents = Arc<FutureMutex<HashMap<String, SubscribeEvent>>>;
 
 message!((TendermintMsg; {value: Value}); (TendermintMethod; {Subscribe: "subscribe"}, {Unsubscribe: "unsubscribe"}));
 
-appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, RocksPlugin);
+appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, RocksPlugin, );
 
 impl Plugin for TendermintPlugin {
     appbase_plugin_default!(TendermintPlugin);
@@ -135,6 +141,8 @@ impl Plugin for TendermintPlugin {
         let monitor = Arc::clone(self.monitor.as_ref().unwrap());
         let sub_events = Arc::clone(self.sub_events.as_ref().unwrap());
         let rocks_channel = self.channels.as_ref().unwrap().get("rocks");
+        let mysql_channel = self.channels.as_ref().unwrap().get("mysql");
+        let rabbit_channel = self.channels.as_ref().unwrap().get("rabbit");
         tokio::spawn(async move {
             let mut mon_lock = monitor.lock().await;
             loop {
@@ -142,8 +150,8 @@ impl Plugin for TendermintPlugin {
                 let mut sub_events_lock = sub_events.lock().await;
                 if let Ok(message) = mon_lock.try_recv() {
                     let message_map = message.as_object().unwrap();
-                    let method = TendermintMethod::find(get_str!(message_map; "method").unwrap()).unwrap();
-                    let params = get_object!(message_map; "value").unwrap();
+                    let method = TendermintMethod::find(get_str(message_map, "method").unwrap()).unwrap();
+                    let params = get_object(message_map, "value").unwrap();
                     match method {
                         TendermintMethod::Subscribe => {
                             let new_event = SubscribeEvent::new(String::from("tendermint"), &params);
@@ -156,7 +164,7 @@ impl Plugin for TendermintPlugin {
                             let _ = rocks_channel.lock().unwrap().send(message);
                         }
                         TendermintMethod::Unsubscribe => {
-                            let task_id = get_string!(params; "task_id").unwrap();
+                            let task_id = get_string(&params, "task_id").unwrap();
                             sub_events_lock.remove(&task_id);
 
                             let rocks_msg = RocksMsg::new(RocksMethod::Delete, task_id.clone(), Value::Null);
@@ -181,19 +189,19 @@ impl Plugin for TendermintPlugin {
                                     let res_body = res_result.unwrap().text().await;
                                     if res_body.is_ok() {
                                         let body: Map<String, Value> = serde_json::from_str(res_body.unwrap().as_str()).unwrap();
-                                        let block = get_object!(&body; "block");
+                                        let block = get_object(&body, "block");
                                         if block.is_err() {
                                             println!("{}", block.unwrap_err());
                                             continue;
                                         }
                                         let unwrapped_block = block.unwrap();
-                                        let header = get_object!(&unwrapped_block; "header");
+                                        let header = get_object(&unwrapped_block, "header");
                                         if header.is_err() {
                                             println!("{}", header.unwrap_err());
                                             continue;
                                         }
                                         let unwrapped_header = header.unwrap();
-                                        let height = get_str!(&unwrapped_header; "height");
+                                        let height = get_str(&unwrapped_header, "height");
                                         if height.is_err() {
                                             println!("{}", height.unwrap_err());
                                             continue;
@@ -233,7 +241,7 @@ impl Plugin for TendermintPlugin {
                                         if status.is_success() {
                                             match sub_event.target {
                                                 SubscribeTarget::Block => {
-                                                    let block = get_object!(&body; "block");
+                                                    let block = get_object(&body, "block");
                                                     if block.is_err() {
                                                         println!("{}", block.unwrap_err());
                                                         continue;
@@ -241,17 +249,40 @@ impl Plugin for TendermintPlugin {
                                                     let header = block.unwrap().get("header").unwrap();
 
                                                     println!("event_id={}, header={}", sub_event.event_id(), header.to_string());
+
+                                                    dotenv().ok();
+                                                    if bool::from_str(env::var("TM_BLOCK_MYSQL_SYNC").unwrap().as_str()).unwrap() {
+                                                    }
+                                                    if bool::from_str(env::var("TM_BLOCK_RABBIT_PUBLISH").unwrap().as_str()).unwrap() {
+                                                        let _ = rabbit_channel.lock().unwrap().send(Value::String(header.to_string()));
+                                                    }
                                                 }
                                                 SubscribeTarget::Tx => {
                                                     let txs = body.get("txs").unwrap().as_array().unwrap();
                                                     for tx in txs.iter() {
                                                         println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
+
+                                                        dotenv().ok();
+                                                        if bool::from_str(env::var("TM_TX_MYSQL_SYNC").unwrap().as_str()).unwrap() {
+                                                            let tx_object = tx.as_object().unwrap();
+                                                            let query = query("tm_tx", vec!["txhash", "height", "gas_wanted", "gas_used", "raw_log", "timestamp"]);
+                                                            let values = pick(tx_object, vec!["txhash", "height", "gas_wanted", "gas_used", "raw_log", "timestamp"]);
+                                                            if values.is_ok() {
+                                                                let mysql_msg = MySqlMsg::new(MySqlMethod::Insert, String::from(query), Value::Object(values.unwrap()));
+                                                                let _ = mysql_channel.lock().unwrap().send(mysql_msg);
+                                                            } else {
+                                                                println!("{}", values.unwrap_err());
+                                                            }
+                                                        }
+                                                        if bool::from_str(env::var("TM_TX_RABBIT_PUBLISH").unwrap().as_str()).unwrap() {
+                                                            let _ = rabbit_channel.lock().unwrap().send(Value::String(tx.to_string()));
+                                                        }
                                                     }
                                                 }
                                             }
                                             Self::sync_event(sub_event, &rocks_channel);
                                         } else {
-                                            let err_msg = get_string!(body; "error").unwrap();
+                                            let err_msg = get_string(&body, "error").unwrap();
                                             if err_msg.starts_with("requested block height") {
                                                 println!("waiting for next block...");
                                             } else {
