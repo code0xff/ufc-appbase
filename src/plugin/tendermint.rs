@@ -9,12 +9,14 @@ use futures::lock::Mutex as FutureMutex;
 use jsonrpc_core::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+use dotenv::dotenv;
+use std::env;
 
 use crate::{enumeration, message};
 use crate::libs::mysql_helper::query;
 use crate::libs::serde_helper::{get_object, get_str, get_string, pick};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
-use crate::plugin::mysql::{MySqlMethod, MySqlMsg, MySqlPlugin};
+use crate::plugin::mysql::{MySqlMethod, MySqlMsg};
 use crate::plugin::rocks::{RocksMethod, RocksMsg, RocksPlugin};
 use crate::types::channel::MultiChannel;
 use crate::types::enumeration::Enumeration;
@@ -31,7 +33,7 @@ pub struct TendermintPlugin {
 impl TendermintPlugin {
     fn init(&mut self) {
         self.sub_events = Some(Arc::new(FutureMutex::new(HashMap::new())));
-        let channels = MultiChannel::new(vec!(String::from("tendermint"), String::from("rocks"), String::from("mysql")));
+        let channels = MultiChannel::new(vec!(String::from("tendermint"), String::from("rocks"), String::from("mysql"), String::from("rabbit")));
         self.channels = Some(channels.to_owned());
         self.monitor = Some(app::subscribe_channel(String::from("tendermint")));
     }
@@ -102,13 +104,29 @@ impl TendermintPlugin {
 
         sub_event.curr_height += 1;
     }
+
+    fn send_mysql(tx: &Value, mysql_channel: &ChannelHandle) {
+        let tx_object = tx.as_object().unwrap();
+        let query = query("tm_tx", vec!["txhash", "height", "gas_wanted", "gas_used", "raw_log", "timestamp"]);
+        let values = pick(tx_object, vec!["txhash", "height", "gas_wanted", "gas_used", "raw_log", "timestamp"]);
+        if values.is_ok() {
+            let mysql_msg = MySqlMsg::new(MySqlMethod::Insert, String::from(query), Value::Object(values.unwrap()));
+            let _ = mysql_channel.lock().unwrap().send(mysql_msg);
+        } else {
+            println!("{}", values.unwrap_err());
+        }
+    }
+
+    fn send_rabbit(tx: &Value, rabbit_channel: &ChannelHandle) {
+        let _ = rabbit_channel.lock().unwrap().send(Value::String(tx.to_string()));
+    }
 }
 
 type SubscribeEvents = Arc<FutureMutex<HashMap<String, SubscribeEvent>>>;
 
 message!((TendermintMsg; {value: Value}); (TendermintMethod; {Subscribe: "subscribe"}, {Unsubscribe: "unsubscribe"}));
 
-appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, RocksPlugin, MySqlPlugin);
+appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, RocksPlugin);
 
 impl Plugin for TendermintPlugin {
     appbase_plugin_default!(TendermintPlugin);
@@ -139,6 +157,7 @@ impl Plugin for TendermintPlugin {
         let sub_events = Arc::clone(self.sub_events.as_ref().unwrap());
         let rocks_channel = self.channels.as_ref().unwrap().get("rocks");
         let mysql_channel = self.channels.as_ref().unwrap().get("mysql");
+        let rabbit_channel = self.channels.as_ref().unwrap().get("rabbit");
         tokio::spawn(async move {
             let mut mon_lock = monitor.lock().await;
             loop {
@@ -251,14 +270,12 @@ impl Plugin for TendermintPlugin {
                                                     for tx in txs.iter() {
                                                         println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
 
-                                                        let tx_object = tx.as_object().unwrap();
-                                                        let query = query("tm_tx", vec!["txhash", "height", "gas_wanted", "gas_used", "raw_log", "timestamp"]);
-                                                        let values = pick(tx_object, vec!["txhash", "height", "gas_wanted", "gas_used", "raw_log", "timestamp"]);
-                                                        if values.is_err() {
-                                                            println!("{}", values.unwrap_err());
-                                                        } else {
-                                                            let mysql_msg = MySqlMsg::new(MySqlMethod::Insert, String::from(query), Value::Object(values.unwrap()));
-                                                            let _ = mysql_channel.lock().unwrap().send(mysql_msg);
+                                                        dotenv().ok();
+                                                        if bool::from_str(env::var("TM_MYSQL_SYNC").unwrap().as_str()).unwrap() {
+                                                            Self::send_mysql(tx, &mysql_channel);
+                                                        }
+                                                        if bool::from_str(env::var("TM_RABBIT_PUBLISH").unwrap().as_str()).unwrap() {
+                                                            Self::send_rabbit(tx, &rabbit_channel);
                                                         }
                                                     }
                                                 }
