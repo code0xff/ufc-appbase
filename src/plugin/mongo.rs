@@ -8,7 +8,7 @@ use mongodb::bson;
 use mongodb::bson::*;
 use mongodb::options::ClientOptions;
 
-use crate::libs::serde_helper::get_string;
+use crate::libs::serde::get_string;
 
 pub struct MongoPlugin {
     base: PluginBase,

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use crate::{enumeration, message};
-use crate::libs::serde_helper::get_str;
+use crate::libs::serde::get_str;
 use crate::libs::serialize;
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::types::enumeration::Enumeration;

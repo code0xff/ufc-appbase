@@ -1,14 +1,19 @@
 use serde_json::{Map, Value};
-use crate::verify_str;
+
+use crate::validation::verify::verify_default;
 
 pub fn verify(params: &Map<String, Value>) -> Result<(), String> {
-    verify_str!(params; "task_id");
+    let verified = verify_default(params, vec![("task_id", "string")]);
+    if verified.is_err() {
+        return Err(verified.unwrap_err());
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod unsubscribe_test {
-    use serde_json::{Map, json};
+    use serde_json::{json, Map};
+
     use crate::validation::unsubscribe::verify;
 
     #[test]

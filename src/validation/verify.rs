@@ -1,20 +1,20 @@
-#[macro_export]
-macro_rules! verify_str {
-    ($params:ident; $($name:expr),*) => {
-        $(if $params.get($name).is_none() || !$params.get($name).unwrap().is_string() { return Err(format!("invalid {} value", $name)); })*
-    };
-}
+use serde_json::{Map, Value};
 
-#[macro_export]
-macro_rules! verify_num {
-    ($params:ident; $($name:expr),*) => {
-        $(if $params.get($name).is_none() || !$params.get($name).unwrap().is_number() { return Err(format!("invalid {} value", $name)); })*
-    };
-}
+use crate::libs::serde::get_type;
 
-#[macro_export]
-macro_rules! verify_arr {
-    ($params:ident; $($name:expr),*) => {
-        $(if $params.get($name).is_none() || !$params.get($name).unwrap().is_array() { return Err(format!("invalid {} value", $name)); })*
-    };
+pub fn verify_default(params: &Map<String, Value>, names: Vec<(&str, &str)>) -> Result<(), String> {
+    for (name, types) in names.into_iter() {
+        if params.get(name).is_none() {
+            return Err(format!("{} does not exist", name));
+        } else {
+            let checked_type = get_type(params.get(name).unwrap());
+            if checked_type.is_err() {
+                return Err(checked_type.unwrap_err());
+            }
+            if checked_type.unwrap() != types {
+                return Err(format!("{} is not {}", name, types));
+            }
+        }
+    }
+    Ok(())
 }
