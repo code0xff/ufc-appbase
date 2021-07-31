@@ -293,14 +293,12 @@ impl Plugin for TendermintPlugin {
                                     Self::error_handler(&rocks_channel, sub_event, block.unwrap_err().to_string());
                                     continue;
                                 }
-                                let unwrapped_block = block.unwrap();
-                                let header = get_object(unwrapped_block, "header");
+                                let header = get_object(block.unwrap(), "header");
                                 if header.is_err() {
                                     Self::error_handler(&rocks_channel, sub_event, header.unwrap_err().to_string());
                                     continue;
                                 }
-                                let unwrapped_header = header.unwrap();
-                                let height = get_str(unwrapped_header, "height");
+                                let height = get_str(header.unwrap(), "height");
                                 if height.is_err() {
                                     Self::error_handler(&rocks_channel, sub_event, height.unwrap_err().to_string());
                                     continue;
@@ -330,8 +328,7 @@ impl Plugin for TendermintPlugin {
                                         break;
                                     }
 
-                                    let body_str = res_body.unwrap();
-                                    let parsed_body = serde_json::from_str(body_str.as_str());
+                                    let parsed_body = serde_json::from_str(res_body.unwrap().as_str());
                                     if parsed_body.is_err() {
                                         Self::error_handler(&rocks_channel, sub_event, parsed_body.unwrap_err().to_string());
                                         break;
@@ -343,12 +340,12 @@ impl Plugin for TendermintPlugin {
                                         break;
                                     }
 
-                                    let pt = get_str(&body, "page_total");
-                                    if pt.is_err() {
-                                        Self::error_handler(&rocks_channel, sub_event, pt.unwrap_err().to_string());
+                                    let temp_page_total = get_str(&body, "page_total");
+                                    if temp_page_total.is_err() {
+                                        Self::error_handler(&rocks_channel, sub_event, temp_page_total.unwrap_err().to_string());
                                         break;
                                     }
-                                    let page_total = i32::from_str(pt.unwrap()).unwrap();
+                                    let page_total = i32::from_str(temp_page_total.unwrap()).unwrap();
 
                                     let txs = get_array(&body, "txs").unwrap();
                                     for tx in txs.iter() {
