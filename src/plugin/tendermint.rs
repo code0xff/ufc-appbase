@@ -14,7 +14,7 @@ use serde_json::{json, Map, Value};
 use crate::{enumeration, message};
 use crate::libs::mysql::query;
 use crate::libs::rocks::{get_by_prefix_static, get_static};
-use crate::libs::serde::{get_object, get_str, get_string, pick};
+use crate::libs::serde::{get_object, get_str, get_string, get_array, pick};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::plugin::mysql::{MySqlMethod, MySqlMsg, MySqlPlugin};
 use crate::plugin::rabbit::RabbitPlugin;
@@ -218,11 +218,61 @@ impl Plugin for TendermintPlugin {
 
                 for (_, sub_event) in sub_events_lock.iter_mut() {
                     if sub_event.is_workable() {
-                        let res_result = match sub_event.target {
+                        match sub_event.target {
                             SubscribeTarget::Block => {
                                 let node_index = usize::from(sub_event.node_idx);
                                 let req_url = format!("{}/blocks/{}", sub_event.nodes[node_index], sub_event.curr_height);
-                                reqwest::get(req_url).await
+                                let res_result = reqwest::get(req_url).await;
+
+                                match res_result {
+                                    Ok(res) => {
+                                        let status = res.status().clone();
+                                        let res_body = res.text().await;
+
+                                        match res_body {
+                                            Ok(body_str) => {
+                                                let parsed_body = serde_json::from_str(body_str.as_str());
+                                                if parsed_body.is_err() {
+                                                    println!("parsing error occurred...");
+                                                    continue;
+                                                }
+                                                let body: Map<String, Value> = parsed_body.unwrap();
+                                                if status.is_success() {
+                                                    let block = get_object(&body, "block");
+                                                    if block.is_err() {
+                                                        println!("{}", block.unwrap_err());
+                                                        continue;
+                                                    }
+                                                    let header = block.unwrap().get("header").unwrap();
+
+                                                    println!("event_id={}, header={}", sub_event.event_id(), header.to_string());
+
+                                                    dotenv().ok();
+                                                    if bool::from_str(env::var("TM_BLOCK_MYSQL_SYNC").unwrap().as_str()).unwrap() {}
+                                                    if bool::from_str(env::var("TM_BLOCK_RABBIT_PUBLISH").unwrap().as_str()).unwrap() {
+                                                        let _ = rabbit_channel.lock().unwrap().send(Value::String(header.to_string()));
+                                                    }
+
+                                                    Self::sync_event(&rocks_channel, sub_event);
+                                                    sub_event.curr_height += 1;
+                                                } else {
+                                                    let err_msg = get_string(&body, "error").unwrap();
+                                                    if err_msg.starts_with("requested block height") {
+                                                        println!("waiting for next block...");
+                                                    } else {
+                                                        Self::error_handler(&rocks_channel, sub_event, err_msg);
+                                                    }
+                                                }
+                                            }
+                                            Err(err) => {
+                                                Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                            }
+                                        }
+                                    }
+                                    Err(err) => {
+                                        Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                    }
+                                }
                             }
                             SubscribeTarget::Tx => {
                                 let node_idx = usize::from(sub_event.node_idx);
@@ -252,95 +302,85 @@ impl Plugin for TendermintPlugin {
                                         let latest_height = u64::from_str(height.unwrap()).unwrap();
                                         if sub_event.curr_height <= latest_height {
                                             let node_index = usize::from(sub_event.node_idx);
-                                            let req_url = format!("{}/txs?page=1&limit=100&tx.height={}", sub_event.nodes[node_index], sub_event.curr_height);
-                                            reqwest::get(req_url).await
+                                            let mut page = 1;
+                                            let mut page_total = 1;
+
+                                            loop {
+                                                let req_url = format!("{}/txs?page={}&limit=100&tx.height={}", sub_event.nodes[node_index], page, sub_event.curr_height);
+                                                let res_result = reqwest::get(req_url).await;
+
+                                                match res_result {
+                                                    Ok(res) => {
+                                                        let status = res.status().clone();
+                                                        let res_body = res.text().await;
+
+                                                        match res_body {
+                                                            Ok(body_str) => {
+                                                                let parsed_body = serde_json::from_str(body_str.as_str());
+                                                                if parsed_body.is_err() {
+                                                                    println!("parsing error occurred...");
+                                                                    break;
+                                                                }
+                                                                let body: Map<String, Value> = parsed_body.unwrap();
+                                                                if status.is_success() {
+                                                                    let pt = get_str(&body, "page_total");
+                                                                    if pt.is_err() {
+                                                                        println!("{}", pt.unwrap_err());
+                                                                        break;
+                                                                    }
+                                                                    page_total = i32::from_str(pt.unwrap()).unwrap();
+
+                                                                    let txs = get_array(&body, "txs").unwrap();
+                                                                    for tx in txs.iter() {
+                                                                        println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
+
+                                                                        dotenv().ok();
+                                                                        if bool::from_str(env::var("TM_TX_MYSQL_SYNC").unwrap().as_str()).unwrap() {
+                                                                            let tx_object = tx.as_object().unwrap();
+                                                                            let query = query("tm_tx", vec!["txhash", "height", "gas_wanted", "gas_used", "raw_log", "timestamp"]);
+                                                                            let values = pick(tx_object, vec!["txhash", "height", "gas_wanted", "gas_used", "raw_log", "timestamp"]);
+                                                                            if values.is_ok() {
+                                                                                let mysql_msg = MySqlMsg::new(MySqlMethod::Insert, String::from(query), Value::Object(values.unwrap()));
+                                                                                let _ = mysql_channel.lock().unwrap().send(mysql_msg);
+                                                                            } else {
+                                                                                println!("{}", values.unwrap_err());
+                                                                            }
+                                                                        }
+                                                                        if bool::from_str(env::var("TM_TX_RABBIT_PUBLISH").unwrap().as_str()).unwrap() {
+                                                                            let _ = rabbit_channel.lock().unwrap().send(Value::String(tx.to_string()));
+                                                                        }
+                                                                    }
+
+                                                                    Self::sync_event(&rocks_channel, sub_event);
+                                                                    sub_event.curr_height += 1;
+                                                                }
+                                                            }
+                                                            Err(err) => {
+                                                                Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                                                break;
+                                                            }
+                                                        }
+                                                    }
+                                                    Err(err) => {
+                                                        Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                                        break;
+                                                    }
+                                                }
+                                                if page < page_total {
+                                                    page += 1;
+                                                } else {
+                                                    break;
+                                                }
+                                            }
                                         } else {
                                             println!("waiting for next block...");
-                                            continue;
                                         }
                                     } else {
                                         Self::error_handler(&rocks_channel, sub_event, res_body.unwrap_err().to_string());
-                                        continue;
                                     }
                                 } else {
                                     Self::error_handler(&rocks_channel, sub_event, res_result.unwrap_err().to_string());
-                                    continue;
                                 }
-                            }
-                        };
-
-                        match res_result {
-                            Ok(res) => {
-                                let status = res.status().clone();
-                                let res_body = res.text().await;
-                                match res_body {
-                                    Ok(body_str) => {
-                                        let parsed_body = serde_json::from_str(body_str.as_str());
-                                        if parsed_body.is_err() {
-                                            println!("parsing error occurred...");
-                                            continue;
-                                        }
-                                        let body: Map<String, Value> = parsed_body.unwrap();
-                                        if status.is_success() {
-                                            match sub_event.target {
-                                                SubscribeTarget::Block => {
-                                                    let block = get_object(&body, "block");
-                                                    if block.is_err() {
-                                                        println!("{}", block.unwrap_err());
-                                                        continue;
-                                                    }
-                                                    let header = block.unwrap().get("header").unwrap();
-
-                                                    println!("event_id={}, header={}", sub_event.event_id(), header.to_string());
-
-                                                    dotenv().ok();
-                                                    if bool::from_str(env::var("TM_BLOCK_MYSQL_SYNC").unwrap().as_str()).unwrap() {}
-                                                    if bool::from_str(env::var("TM_BLOCK_RABBIT_PUBLISH").unwrap().as_str()).unwrap() {
-                                                        let _ = rabbit_channel.lock().unwrap().send(Value::String(header.to_string()));
-                                                    }
-                                                }
-                                                SubscribeTarget::Tx => {
-                                                    let txs = body.get("txs").unwrap().as_array().unwrap();
-                                                    for tx in txs.iter() {
-                                                        println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
-
-                                                        dotenv().ok();
-                                                        if bool::from_str(env::var("TM_TX_MYSQL_SYNC").unwrap().as_str()).unwrap() {
-                                                            let tx_object = tx.as_object().unwrap();
-                                                            let query = query("tm_tx", vec!["txhash", "height", "gas_wanted", "gas_used", "raw_log", "timestamp"]);
-                                                            let values = pick(tx_object, vec!["txhash", "height", "gas_wanted", "gas_used", "raw_log", "timestamp"]);
-                                                            if values.is_ok() {
-                                                                let mysql_msg = MySqlMsg::new(MySqlMethod::Insert, String::from(query), Value::Object(values.unwrap()));
-                                                                let _ = mysql_channel.lock().unwrap().send(mysql_msg);
-                                                            } else {
-                                                                println!("{}", values.unwrap_err());
-                                                            }
-                                                        }
-                                                        if bool::from_str(env::var("TM_TX_RABBIT_PUBLISH").unwrap().as_str()).unwrap() {
-                                                            let _ = rabbit_channel.lock().unwrap().send(Value::String(tx.to_string()));
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            Self::sync_event(&rocks_channel, sub_event);
-
-                                            sub_event.curr_height += 1;
-                                        } else {
-                                            let err_msg = get_string(&body, "error").unwrap();
-                                            if err_msg.starts_with("requested block height") {
-                                                println!("waiting for next block...");
-                                            } else {
-                                                Self::error_handler(&rocks_channel, sub_event, err_msg);
-                                            }
-                                        }
-                                    }
-                                    Err(err) => {
-                                        Self::error_handler(&rocks_channel, sub_event, err.to_string());
-                                    }
-                                };
-                            }
-                            Err(err) => {
-                                Self::error_handler(&rocks_channel, sub_event, err.to_string());
                             }
                         }
                     }
