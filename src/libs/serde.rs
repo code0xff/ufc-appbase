@@ -84,6 +84,23 @@ pub fn get_object<'a>(params: &'a Map<String, Value>, name: &'a str) -> Result<&
     }
 }
 
+pub fn get_array<'a>(params: &'a Map<String, Value>, name: &'a str) -> Result<&'a Vec<Value>, String> {
+    let unwrapped = unwrap(params, name);
+    if unwrapped.is_ok() {
+        let opt_val = unwrapped.unwrap().as_array();
+        match opt_val {
+            None => {
+                Err(format!("{} is not {}", name, "array"))
+            }
+            Some(val) => {
+                Ok(val)
+            }
+        }
+    } else {
+        Err(unwrapped.unwrap_err())
+    }
+}
+
 // pub fn get_bool(params: &Map<String, Value>, name: &str) -> Result<bool, String> {
 //     let unwrapped = unwrap(params, name);
 //     if unwrapped.is_ok() {
