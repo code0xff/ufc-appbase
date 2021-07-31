@@ -34,6 +34,10 @@ impl RocksPlugin {
             }
         }
     }
+
+    pub fn get_db(&self) -> Arc<DBWithThreadMode<SingleThreaded>> {
+        Arc::clone(self.db.as_ref().unwrap())
+    }
 }
 
 appbase_plugin_requires!(RocksPlugin; );
