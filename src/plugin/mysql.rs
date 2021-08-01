@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::{enumeration, message};
+use crate::libs::environment;
 use crate::libs::mysql::get_params;
 use crate::libs::serde::{get_object, get_str};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
@@ -39,7 +40,8 @@ impl Plugin for MySqlPlugin {
         if !self.plugin_initialize() {
             return;
         }
-        let opts = Opts::from_url("mysql://root:mariadb@localhost:3306/ufc").unwrap();
+        let mysql_url = environment::string("MY_SQL_URL").unwrap();
+        let opts = Opts::from_url(mysql_url.as_str()).unwrap();
         let pool = Pool::new(opts).unwrap();
         self.pool = Some(Arc::new(Mutex::new(pool)));
         self.monitor = Some(app::subscribe_channel(String::from("mysql")));

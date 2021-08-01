@@ -4,6 +4,8 @@ use amiquip::{Connection, Exchange, Publish};
 use appbase::*;
 use futures::lock::Mutex as FutureMutex;
 
+use crate::libs::environment;
+
 pub struct RabbitPlugin {
     base: PluginBase,
     conn: Option<RabbitConnection>,
@@ -30,7 +32,8 @@ impl Plugin for RabbitPlugin {
             return;
         }
 
-        self.conn = Some(Arc::new(FutureMutex::new(Connection::insecure_open("amqp://rabbitmq:rabbitmq@localhost:5672").unwrap())));
+        let rabbit_mq_url = environment::string("RABBIT_MQ_URL").unwrap();
+        self.conn = Some(Arc::new(FutureMutex::new(Connection::insecure_open(rabbit_mq_url.as_str()).unwrap())));
         self.monitor = Some(app::subscribe_channel(String::from("rabbit")));
     }
 
