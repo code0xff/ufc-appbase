@@ -263,7 +263,7 @@ impl Plugin for TendermintPlugin {
                                 println!("event_id={}, header={}", sub_event.event_id(), header.to_string());
 
                                 if libs::environment::bool("TM_BLOCK_MYSQL_SYNC").unwrap() {}
-                                if libs::environment::bool("TM_BLOCK_RABBIT_PUBLISH").unwrap() {
+                                if libs::environment::bool("TM_BLOCK_RABBIT_MQ_PUBLISH").unwrap() {
                                     let _ = rabbit_channel.lock().unwrap().send(Value::String(header.to_string()));
                                 }
 
@@ -359,7 +359,7 @@ impl Plugin for TendermintPlugin {
                                                 println!("{}", values.unwrap_err());
                                             }
                                         }
-                                        if libs::environment::bool("TM_TX_RABBIT_PUBLISH").unwrap() {
+                                        if libs::environment::bool("TM_TX_RABBIT_MQ_PUBLISH").unwrap() {
                                             let _ = rabbit_channel.lock().unwrap().send(Value::String(tx.to_string()));
                                         }
                                     }

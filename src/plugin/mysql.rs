@@ -40,7 +40,7 @@ impl Plugin for MySqlPlugin {
         if !self.plugin_initialize() {
             return;
         }
-        let mysql_url = environment::string("MY_SQL_URL").unwrap();
+        let mysql_url = environment::string("MYSQL_URL").unwrap();
         let opts = Opts::from_url(mysql_url.as_str()).unwrap();
         let pool = Pool::new(opts).unwrap();
         self.pool = Some(Arc::new(Mutex::new(pool)));

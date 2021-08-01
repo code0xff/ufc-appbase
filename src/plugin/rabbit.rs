@@ -49,7 +49,8 @@ impl Plugin for RabbitPlugin {
             let exchange = Exchange::direct(&channel);
             loop {
                 if let Ok(msg) = mon_lock.try_recv() {
-                    let _ = exchange.publish(Publish::new(msg.as_str().unwrap().as_bytes(), "ufc"));
+                    let queue = environment::string("RABBIT_MQ_QUEUE").unwrap();
+                    let _ = exchange.publish(Publish::new(msg.as_str().unwrap().as_bytes(), queue.as_str()));
                 }
             }
         });
