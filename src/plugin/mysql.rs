@@ -56,13 +56,13 @@ impl Plugin for MySqlPlugin {
         tokio::spawn(async move {
             let mut locked_monitor = monitor.lock().await;
             loop {
-                if let Ok(message) = locked_monitor.try_recv() {
-                    let map = message.as_object().unwrap();
-                    let method = MySqlMethod::find(get_str(map, "method").unwrap()).unwrap();
+                if let Ok(msg) = locked_monitor.try_recv() {
+                    let parsed_msg = msg.as_object().unwrap();
+                    let method = MySqlMethod::find(get_str(parsed_msg, "method").unwrap()).unwrap();
                     match method {
                         MySqlMethod::Insert => {
-                            let query = get_str(map, "query").unwrap();
-                            let value = get_object(map, "value").unwrap();
+                            let query = get_str(parsed_msg, "query").unwrap();
+                            let value = get_object(parsed_msg, "value").unwrap();
                             let params = get_params(value);
                             let result = pool.lock().unwrap().get_conn().unwrap().exec_drop(query, params);
                             if result.is_err() {

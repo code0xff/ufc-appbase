@@ -54,14 +54,14 @@ impl Plugin for MongoPlugin {
             loop {
                 let db_lock = db.lock().await;
                 if let Ok(msg) = mon_lock.try_recv() {
-                    let map = msg.as_object().unwrap();
-                    let coll_nm = get_string(map, "collection").unwrap();
+                    let parsed_msg = msg.as_object().unwrap();
+                    let collection_name = get_string(parsed_msg, "collection").unwrap();
 
-                    let coll = db_lock.collection::<Document>(coll_nm.as_str());
-                    let doc = bson::to_document(&map).unwrap();
-                    println!("{:?}", doc);
+                    let collection = db_lock.collection::<Document>(collection_name.as_str());
+                    let document = bson::to_document(&parsed_msg).unwrap();
+                    println!("{:?}", document);
 
-                    let _ = coll.insert_one(doc, None).await;
+                    let _ = collection.insert_one(document, None).await;
                 }
             }
         });
