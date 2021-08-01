@@ -191,10 +191,10 @@ impl Plugin for TendermintPlugin {
             loop {
                 thread::sleep(Duration::from_secs(1));
                 let mut sub_events_lock = sub_events.lock().await;
-                if let Ok(message) = mon_lock.try_recv() {
-                    let message_map = message.as_object().unwrap();
-                    let method = TendermintMethod::find(get_str(message_map, "method").unwrap()).unwrap();
-                    let params = get_object(message_map, "value").unwrap();
+                if let Ok(msg) = mon_lock.try_recv() {
+                    let parsed_msg = msg.as_object().unwrap();
+                    let method = TendermintMethod::find(get_str(parsed_msg, "method").unwrap()).unwrap();
+                    let params = get_object(parsed_msg, "value").unwrap();
                     match method {
                         TendermintMethod::Subscribe => {
                             let new_event = SubscribeEvent::new(CHAIN, &params);
