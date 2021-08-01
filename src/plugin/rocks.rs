@@ -88,16 +88,16 @@ impl Plugin for RocksPlugin {
             let mut mon_lock = monitor.lock().await;
             loop {
                 if let Ok(msg) = mon_lock.try_recv() {
-                    let data = msg.as_object().unwrap();
-                    let method = RocksMethod::find(data.get("method").unwrap().as_str().unwrap()).unwrap();
+                    let parsed_msg = msg.as_object().unwrap();
+                    let method = RocksMethod::find(parsed_msg.get("method").unwrap().as_str().unwrap()).unwrap();
                     match method {
                         RocksMethod::Put => {
-                            let key = get_str(data, "key").unwrap();
-                            let val = get_str(data, "value").unwrap();
+                            let key = get_str(parsed_msg, "key").unwrap();
+                            let val = get_str(parsed_msg, "value").unwrap();
                             let _ = db.put(key.as_bytes(), val.as_bytes());
                         }
                         RocksMethod::Delete => {
-                            let key = get_str(data, "key").unwrap();
+                            let key = get_str(parsed_msg, "key").unwrap();
                             let _ = db.delete(key.as_bytes());
                         }
                     }

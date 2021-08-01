@@ -17,5 +17,19 @@ macro_rules! message {
                 })
             }
         }
-    }
+    };
+    ($message:ident; $({$message_names:ident: $message_types:ident}),*) => {
+        #[derive(Serialize, Deserialize)]
+        pub struct $message {
+            $($message_names: $message_types,)*
+        }
+
+        impl $message {
+           pub fn new($($message_names: $message_types,)*) -> Value {
+                json!(Self {
+                    $($message_names,)*
+                })
+            }
+        }
+    };
 }

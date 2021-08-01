@@ -10,6 +10,7 @@ mod libs;
 #[tokio::main]
 async fn main() {
     env_logger::init();
+    dotenv::dotenv().ok();
     app::register_plugin::<TendermintPlugin>();
     app::initialize();
     app::startup();

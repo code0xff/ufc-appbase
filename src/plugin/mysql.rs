@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::{enumeration, message};
+use crate::libs::environment;
 use crate::libs::mysql::get_params;
 use crate::libs::serde::{get_object, get_str};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
@@ -39,7 +40,8 @@ impl Plugin for MySqlPlugin {
         if !self.plugin_initialize() {
             return;
         }
-        let opts = Opts::from_url("mysql://root:mariadb@localhost:3306/ufc").unwrap();
+        let mysql_url = environment::string("MYSQL_URL").unwrap();
+        let opts = Opts::from_url(mysql_url.as_str()).unwrap();
         let pool = Pool::new(opts).unwrap();
         self.pool = Some(Arc::new(Mutex::new(pool)));
         self.monitor = Some(app::subscribe_channel(String::from("mysql")));
@@ -54,13 +56,13 @@ impl Plugin for MySqlPlugin {
         tokio::spawn(async move {
             let mut locked_monitor = monitor.lock().await;
             loop {
-                if let Ok(message) = locked_monitor.try_recv() {
-                    let map = message.as_object().unwrap();
-                    let method = MySqlMethod::find(get_str(map, "method").unwrap()).unwrap();
+                if let Ok(msg) = locked_monitor.try_recv() {
+                    let parsed_msg = msg.as_object().unwrap();
+                    let method = MySqlMethod::find(get_str(parsed_msg, "method").unwrap()).unwrap();
                     match method {
                         MySqlMethod::Insert => {
-                            let query = get_str(map, "query").unwrap();
-                            let value = get_object(map, "value").unwrap();
+                            let query = get_str(parsed_msg, "query").unwrap();
+                            let value = get_object(parsed_msg, "value").unwrap();
                             let params = get_params(value);
                             let result = pool.lock().unwrap().get_conn().unwrap().exec_drop(query, params);
                             if result.is_err() {

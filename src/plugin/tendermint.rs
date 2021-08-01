@@ -1,17 +1,16 @@
-use std::{env, thread};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
 
 use appbase::*;
-use dotenv::dotenv;
 use futures::lock::Mutex as FutureMutex;
 use jsonrpc_core::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use crate::{enumeration, message};
+use crate::{enumeration, libs, message};
 use crate::libs::mysql::query;
 use crate::libs::rocks::{get_by_prefix_static, get_static};
 use crate::libs::serde::{get_array, get_object, get_str, get_string, pick};
@@ -37,7 +36,7 @@ const TASK_PREFIX: &str = "task:tendermint";
 impl TendermintPlugin {
     fn init(&mut self) {
         self.sub_events = Some(Arc::new(FutureMutex::new(HashMap::new())));
-        let channels = MultiChannel::new(vec!(String::from("tendermint"), String::from("rocks"), String::from("mysql"), String::from("rabbit")));
+        let channels = MultiChannel::new(vec!("tendermint", "rocks", "mysql", "rabbit"));
         self.channels = Some(channels.to_owned());
         self.monitor = Some(app::subscribe_channel(String::from("tendermint")));
     }
@@ -71,7 +70,6 @@ impl TendermintPlugin {
                 Box::new(futures::future::ready(Ok(Value::String(format!("already exist task! task_id={}", task_id)))))
             }
         });
-
 
         let tm_channel = self.channels.as_ref().unwrap().get("tendermint");
         let rocks_db = rocks.get_db();
@@ -193,10 +191,10 @@ impl Plugin for TendermintPlugin {
             loop {
                 thread::sleep(Duration::from_secs(1));
                 let mut sub_events_lock = sub_events.lock().await;
-                if let Ok(message) = mon_lock.try_recv() {
-                    let message_map = message.as_object().unwrap();
-                    let method = TendermintMethod::find(get_str(message_map, "method").unwrap()).unwrap();
-                    let params = get_object(message_map, "value").unwrap();
+                if let Ok(msg) = mon_lock.try_recv() {
+                    let parsed_msg = msg.as_object().unwrap();
+                    let method = TendermintMethod::find(get_str(parsed_msg, "method").unwrap()).unwrap();
+                    let params = get_object(parsed_msg, "value").unwrap();
                     match method {
                         TendermintMethod::Subscribe => {
                             let new_event = SubscribeEvent::new(CHAIN, &params);
@@ -264,9 +262,8 @@ impl Plugin for TendermintPlugin {
 
                                 println!("event_id={}, header={}", sub_event.event_id(), header.to_string());
 
-                                dotenv().ok();
-                                if bool::from_str(env::var("TM_BLOCK_MYSQL_SYNC").unwrap().as_str()).unwrap() {}
-                                if bool::from_str(env::var("TM_BLOCK_RABBIT_PUBLISH").unwrap().as_str()).unwrap() {
+                                if libs::environment::bool("TM_BLOCK_MYSQL_SYNC").unwrap() {}
+                                if libs::environment::bool("TM_BLOCK_RABBIT_MQ_PUBLISH").unwrap() {
                                     let _ = rabbit_channel.lock().unwrap().send(Value::String(header.to_string()));
                                 }
 
@@ -351,8 +348,7 @@ impl Plugin for TendermintPlugin {
                                     for tx in txs.iter() {
                                         println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
 
-                                        dotenv().ok();
-                                        if bool::from_str(env::var("TM_TX_MYSQL_SYNC").unwrap().as_str()).unwrap() {
+                                        if libs::environment::bool("TM_TX_MYSQL_SYNC").unwrap() {
                                             let tx_object = tx.as_object().unwrap();
                                             let query = query("tm_tx", vec!["txhash", "height", "gas_wanted", "gas_used", "raw_log", "timestamp"]);
                                             let values = pick(tx_object, vec!["txhash", "height", "gas_wanted", "gas_used", "raw_log", "timestamp"]);
@@ -363,7 +359,7 @@ impl Plugin for TendermintPlugin {
                                                 println!("{}", values.unwrap_err());
                                             }
                                         }
-                                        if bool::from_str(env::var("TM_TX_RABBIT_PUBLISH").unwrap().as_str()).unwrap() {
+                                        if libs::environment::bool("TM_TX_RABBIT_MQ_PUBLISH").unwrap() {
                                             let _ = rabbit_channel.lock().unwrap().send(Value::String(tx.to_string()));
                                         }
                                     }
