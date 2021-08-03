@@ -222,27 +222,32 @@ impl Plugin for TendermintPlugin {
                                 let req_url = format!("{}/blocks/{}", sub_event.nodes[node_index], sub_event.curr_height);
                                 let res_result = reqwest::get(req_url).await;
 
-                                if res_result.is_err() {
-                                    Self::error_handler(&rocks_channel, sub_event, res_result.unwrap_err().to_string());
-                                    continue;
-                                }
+                                let res = match res_result {
+                                    Ok(res) => res,
+                                    Err(err) => {
+                                        Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                        continue;
+                                    }
+                                };
 
-                                let res = res_result.unwrap();
                                 let status = res.status().clone();
                                 let res_body = res.text().await;
+                                let body_str = match res_body {
+                                    Ok(body_str) => body_str,
+                                    Err(err) => {
+                                        Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                        continue;
+                                    }
+                                };
 
-                                if res_body.is_err() {
-                                    Self::error_handler(&rocks_channel, sub_event, res_body.unwrap_err().to_string());
-                                    continue;
-                                }
-
-                                let body_str = res_body.unwrap();
                                 let parsed_body = serde_json::from_str(body_str.as_str());
-                                if parsed_body.is_err() {
-                                    println!("parsing error occurred...");
-                                    continue;
-                                }
-                                let body: Map<String, Value> = parsed_body.unwrap();
+                                let body: Map<String, Value> = match parsed_body {
+                                    Ok(body) => body,
+                                    Err(err) => {
+                                        println!("parsing error occurred... error={:?}", err);
+                                        continue;
+                                    }
+                                };
                                 if !status.is_success() {
                                     let err_msg = get_string(&body, "error").unwrap();
                                     if err_msg.starts_with("requested block height") {
@@ -253,12 +258,15 @@ impl Plugin for TendermintPlugin {
                                     continue;
                                 }
 
-                                let block = get_object(&body, "block");
-                                if block.is_err() {
-                                    println!("{}", block.unwrap_err());
-                                    continue;
-                                }
-                                let header = block.unwrap().get("header").unwrap();
+                                let block_result = get_object(&body, "block");
+                                let block = match block_result {
+                                    Ok(block) => block,
+                                    Err(err) => {
+                                        println!("{}", err);
+                                        continue;
+                                    }
+                                };
+                                let header = block.get("header").unwrap();
 
                                 println!("event_id={}, header={}", sub_event.event_id(), header.to_string());
 
@@ -274,34 +282,47 @@ impl Plugin for TendermintPlugin {
                                 let node_idx = usize::from(sub_event.node_idx);
                                 let latest_req_url = format!("{}/blocks/latest", sub_event.nodes[node_idx]);
                                 let res_result = reqwest::get(latest_req_url).await;
-                                if res_result.is_err() {
-                                    Self::error_handler(&rocks_channel, sub_event, res_result.unwrap_err().to_string());
-                                    continue;
-                                }
-                                let res_body = res_result.unwrap().text().await;
-                                if res_body.is_err() {
-                                    Self::error_handler(&rocks_channel, sub_event, res_body.unwrap_err().to_string());
-                                    continue;
-                                }
+                                let res = match res_result {
+                                    Ok(res) => res,
+                                    Err(err) => {
+                                        Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                        continue;
+                                    }
+                                };
+                                let res_body = res.text().await;
+                                let body: Map<String, Value> = match res_body {
+                                    Ok(body) => serde_json::from_str(body.as_str()).unwrap(),
+                                    Err(err) => {
+                                        Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                        continue;
+                                    }
+                                };
 
-                                let body: Map<String, Value> = serde_json::from_str(res_body.unwrap().as_str()).unwrap();
-                                let block = get_object(&body, "block");
-                                if block.is_err() {
-                                    Self::error_handler(&rocks_channel, sub_event, block.unwrap_err().to_string());
-                                    continue;
-                                }
-                                let header = get_object(block.unwrap(), "header");
-                                if header.is_err() {
-                                    Self::error_handler(&rocks_channel, sub_event, header.unwrap_err().to_string());
-                                    continue;
-                                }
-                                let height = get_str(header.unwrap(), "height");
-                                if height.is_err() {
-                                    Self::error_handler(&rocks_channel, sub_event, height.unwrap_err().to_string());
-                                    continue;
-                                }
-                                let latest_height = u64::from_str(height.unwrap()).unwrap();
-                                if sub_event.curr_height > latest_height {
+                                let block_result = get_object(&body, "block");
+                                let block = match block_result {
+                                    Ok(block) => block,
+                                    Err(err) => {
+                                        Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                        continue;
+                                    }
+                                };
+                                let header_result = get_object(block, "header");
+                                let header = match header_result {
+                                    Ok(header) => header,
+                                    Err(err) => {
+                                        Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                        continue;
+                                    }
+                                };
+                                let height_result = get_str(header, "height");
+                                let last_height = match height_result {
+                                    Ok(height) => u64::from_str(height).unwrap(),
+                                    Err(err) => {
+                                        Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                        continue;
+                                    }
+                                };
+                                if sub_event.curr_height > last_height {
                                     println!("waiting for next block...");
                                     continue;
                                 }
@@ -312,25 +333,24 @@ impl Plugin for TendermintPlugin {
                                     let req_url = format!("{}/txs?page={}&limit=100&tx.height={}", sub_event.nodes[node_index], curr_page, sub_event.curr_height);
                                     let res_result = reqwest::get(req_url).await;
 
-                                    if res_result.is_err() {
-                                        Self::error_handler(&rocks_channel, sub_event, res_result.unwrap_err().to_string());
-                                        break;
-                                    }
-                                    let res = res_result.unwrap();
+                                    let res = match res_result {
+                                        Ok(res) => res,
+                                        Err(err) => {
+                                            Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                            continue;
+                                        }
+                                    };
                                     let status = res.status().clone();
                                     let res_body = res.text().await;
 
-                                    if res_body.is_err() {
-                                        Self::error_handler(&rocks_channel, sub_event, res_body.unwrap_err().to_string());
-                                        break;
-                                    }
+                                    let body: Map<String, Value> = match res_body {
+                                        Ok(body) => serde_json::from_str(body.as_str()).unwrap(),
+                                        Err(err) => {
+                                            Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                            break;
+                                        }
+                                    };
 
-                                    let parsed_body = serde_json::from_str(res_body.unwrap().as_str());
-                                    if parsed_body.is_err() {
-                                        Self::error_handler(&rocks_channel, sub_event, parsed_body.unwrap_err().to_string());
-                                        break;
-                                    }
-                                    let body: Map<String, Value> = parsed_body.unwrap();
                                     if !status.is_success() {
                                         let err_msg = get_string(&body, "error").unwrap();
                                         Self::error_handler(&rocks_channel, sub_event, err_msg);
