@@ -33,6 +33,12 @@ pub struct TendermintPlugin {
 const CHAIN: &str = "tendermint";
 const TASK_PREFIX: &str = "task:tendermint";
 
+type SubscribeEvents = Arc<FutureMutex<HashMap<String, SubscribeEvent>>>;
+
+message!((TendermintMsg; {value: Value}); (TendermintMethod; {Subscribe: "subscribe"}, {Unsubscribe: "unsubscribe"}));
+
+appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, RocksPlugin);
+
 impl TendermintPlugin {
     fn init(&mut self) {
         self.sub_events = Some(Arc::new(FutureMutex::new(HashMap::new())));
@@ -148,12 +154,6 @@ impl TendermintPlugin {
         let _ = rocks_channel.lock().unwrap().send(msg);
     }
 }
-
-type SubscribeEvents = Arc<FutureMutex<HashMap<String, SubscribeEvent>>>;
-
-message!((TendermintMsg; {value: Value}); (TendermintMethod; {Subscribe: "subscribe"}, {Unsubscribe: "unsubscribe"}));
-
-appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, RocksPlugin);
 
 impl Plugin for TendermintPlugin {
     appbase_plugin_default!(TendermintPlugin);

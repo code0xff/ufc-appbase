@@ -43,7 +43,7 @@ impl EmailPlugin {
 
         match mailer.send(&email) {
             Ok(_) => println!("email sent successfully!"),
-            Err(e) => panic!("could not send email: {:?}", e),
+            Err(err) => println!("could not send email: {:?}", err),
         }
     }
 }
@@ -78,18 +78,21 @@ impl Plugin for EmailPlugin {
                     let parsed_to = get_str(parsed_msg, "to");
                     if parsed_to.is_err() {
                         println!("{}", parsed_to.clone().unwrap_err());
+                        continue;
                     }
                     let to = parsed_to.unwrap();
 
                     let parsed_subject = get_str(parsed_msg, "subject");
                     if parsed_subject.is_err() {
                         println!("{}", parsed_subject.clone().unwrap_err());
+                        continue;
                     }
                     let subject = parsed_subject.unwrap();
 
                     let parsed_body = get_str(parsed_msg, "body");
                     if parsed_body.is_err() {
                         println!("{}", parsed_body.clone().unwrap_err());
+                        continue;
                     }
                     let body = parsed_body.unwrap();
 
