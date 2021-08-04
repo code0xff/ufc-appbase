@@ -1,7 +1,7 @@
 use jsonrpc_core::Value;
 use serde_json::Map;
 
-pub fn query(table: &str, mut column: Vec<&str>) -> String {
+pub fn insert_query(table: &str, mut column: Vec<&str>) -> String {
     let columns = column.join(", ");
     let converted: Vec<String> = column.iter_mut().map(|v| { format!(":{}", v) }).collect();
     let values = converted.join(", ");
