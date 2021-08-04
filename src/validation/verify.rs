@@ -8,10 +8,7 @@ pub fn verify_default(params: &Map<String, Value>, names: Vec<(&str, &str)>) -> 
             return Err(format!("{} does not exist", name));
         } else {
             let checked_type = get_type(params.get(name).unwrap());
-            if checked_type.is_err() {
-                return Err(checked_type.unwrap_err());
-            }
-            if checked_type.unwrap() != types {
+            if checked_type != types {
                 return Err(format!("{} is not {}", name, types));
             }
         }

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use crate::{enumeration, libs, message};
-use crate::libs::mysql::query;
+use crate::libs::mysql::insert_query;
 use crate::libs::rocks::{get_by_prefix_static, get_static};
 use crate::libs::serde::{get_array, get_object, get_str, get_string, pick};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
@@ -28,6 +28,10 @@ pub struct TendermintPlugin {
     sub_events: Option<SubscribeEvents>,
     channels: Option<MultiChannel>,
     monitor: Option<SubscribeHandle>,
+    tm_block_sync: Option<bool>,
+    tm_tx_sync: Option<bool>,
+    tm_block_publish: Option<bool>,
+    tm_tx_publish: Option<bool>,
 }
 
 const CHAIN: &str = "tendermint";
@@ -45,6 +49,23 @@ impl TendermintPlugin {
         let channels = MultiChannel::new(vec!("tendermint", "rocks", "mysql", "rabbit"));
         self.channels = Some(channels.to_owned());
         self.monitor = Some(app::subscribe_channel(String::from("tendermint")));
+        self.tm_block_sync = Some(libs::environment::bool("TM_BLOCK_MYSQL_SYNC").unwrap());
+        self.tm_tx_sync = Some(libs::environment::bool("TM_TX_MYSQL_SYNC").unwrap());
+        self.tm_block_publish = Some(libs::environment::bool("TM_BLOCK_RABBIT_MQ_PUBLISH").unwrap());
+        self.tm_tx_publish = Some(libs::environment::bool("TM_TX_RABBIT_MQ_PUBLISH").unwrap());
+    }
+
+    fn create_table(&self) {
+        let plugin_handle = app::get_plugin::<MySqlPlugin>();
+        let mut plugin = plugin_handle.lock().unwrap();
+        let mysql = plugin.downcast_mut::<MySqlPlugin>().unwrap();
+
+        if self.tm_block_sync.unwrap() {
+            mysql.create_table(vec!["table/tm_block.sql"]);
+        }
+        if self.tm_tx_sync.unwrap() {
+            mysql.create_table(vec!["table/tm_tx.sql"]);
+        }
     }
 
     fn register_jsonrpc(&self) {
@@ -107,12 +128,8 @@ impl TendermintPlugin {
             }
 
             let prefix = match params.get("task_id") {
-                None => {
-                    TASK_PREFIX
-                }
-                Some(task_id) => {
-                    task_id.as_str().unwrap()
-                }
+                None => TASK_PREFIX,
+                Some(task_id) => task_id.as_str().unwrap(),
             };
             let tasks = get_by_prefix_static(&rocks_db, prefix);
             Box::new(futures::future::ready(Ok(tasks)))
@@ -164,6 +181,10 @@ impl Plugin for TendermintPlugin {
             sub_events: None,
             channels: None,
             monitor: None,
+            tm_block_sync: None,
+            tm_tx_sync: None,
+            tm_block_publish: None,
+            tm_tx_publish: None,
         }
     }
 
@@ -173,6 +194,7 @@ impl Plugin for TendermintPlugin {
         }
         self.init();
         self.register_jsonrpc();
+        self.create_table();
         self.load_tasks();
     }
 
@@ -186,6 +208,11 @@ impl Plugin for TendermintPlugin {
         let rocks_channel = self.channels.as_ref().unwrap().get("rocks");
         let mysql_channel = self.channels.as_ref().unwrap().get("mysql");
         let rabbit_channel = self.channels.as_ref().unwrap().get("rabbit");
+
+        let tm_block_sync = self.tm_block_sync.unwrap();
+        let tm_tx_sync = self.tm_tx_sync.unwrap();
+        let tm_block_publish = self.tm_block_publish.unwrap();
+        let tm_tx_publish = self.tm_tx_publish.unwrap();
         tokio::spawn(async move {
             let mut mon_lock = monitor.lock().await;
             loop {
@@ -270,8 +297,19 @@ impl Plugin for TendermintPlugin {
 
                                 println!("event_id={}, header={}", sub_event.event_id(), header.to_string());
 
-                                if libs::environment::bool("TM_BLOCK_MYSQL_SYNC").unwrap() {}
-                                if libs::environment::bool("TM_BLOCK_RABBIT_MQ_PUBLISH").unwrap() {
+                                if tm_block_sync {
+                                    let header_object = header.as_object().unwrap();
+                                    let column = vec!["chain_id", "height", "time", "last_commit_hash", "data_hash", "validators_hash", "next_validators_hash", "consensus_hash", "app_hash", "last_results_hash", "evidence_hash", "proposer_address"];
+                                    let query = insert_query("tm_block", column.clone());
+                                    let values = pick(header_object, column.clone());
+                                    if values.is_ok() {
+                                        let mysql_msg = MySqlMsg::new(MySqlMethod::Insert, String::from(query), Value::Object(values.unwrap()));
+                                        let _ = mysql_channel.lock().unwrap().send(mysql_msg);
+                                    } else {
+                                        println!("{}", values.unwrap_err());
+                                    }
+                                }
+                                if tm_block_publish {
                                     let _ = rabbit_channel.lock().unwrap().send(Value::String(header.to_string()));
                                 }
 
@@ -368,10 +406,11 @@ impl Plugin for TendermintPlugin {
                                     for tx in txs.iter() {
                                         println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
 
-                                        if libs::environment::bool("TM_TX_MYSQL_SYNC").unwrap() {
+                                        if tm_tx_sync {
                                             let tx_object = tx.as_object().unwrap();
-                                            let query = query("tm_tx", vec!["txhash", "height", "gas_wanted", "gas_used", "raw_log", "timestamp"]);
-                                            let values = pick(tx_object, vec!["txhash", "height", "gas_wanted", "gas_used", "raw_log", "timestamp"]);
+                                            let column = vec!["txhash", "height", "gas_wanted", "gas_used", "raw_log", "timestamp"];
+                                            let query = insert_query("tm_tx", column.clone());
+                                            let values = pick(tx_object, column.clone());
                                             if values.is_ok() {
                                                 let mysql_msg = MySqlMsg::new(MySqlMethod::Insert, String::from(query), Value::Object(values.unwrap()));
                                                 let _ = mysql_channel.lock().unwrap().send(mysql_msg);
@@ -379,7 +418,7 @@ impl Plugin for TendermintPlugin {
                                                 println!("{}", values.unwrap_err());
                                             }
                                         }
-                                        if libs::environment::bool("TM_TX_RABBIT_MQ_PUBLISH").unwrap() {
+                                        if tm_tx_publish {
                                             let _ = rabbit_channel.lock().unwrap().send(Value::String(tx.to_string()));
                                         }
                                     }
