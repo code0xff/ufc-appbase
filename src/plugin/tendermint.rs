@@ -46,7 +46,7 @@ appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, RocksPlugin);
 impl TendermintPlugin {
     fn init(&mut self) {
         self.sub_events = Some(Arc::new(FutureMutex::new(HashMap::new())));
-        let channels = MultiChannel::new(vec!("tendermint", "rocks"));
+        let channels = MultiChannel::new(vec!("tendermint", "rocks", "mysql", "rabbit"));
         self.channels = Some(channels.to_owned());
         self.monitor = Some(app::subscribe_channel(String::from("tendermint")));
         self.tm_block_sync = Some(libs::environment::bool("TM_BLOCK_MYSQL_SYNC").unwrap());
