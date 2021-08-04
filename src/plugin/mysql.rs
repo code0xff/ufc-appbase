@@ -1,3 +1,4 @@
+use std::fs;
 use std::sync::{Arc, Mutex};
 
 use appbase::*;
@@ -24,6 +25,22 @@ type MySqlPool = Arc<Mutex<Pool>>;
 message!((MySqlMsg; {query: String}, {value: Value}); (MySqlMethod; {Insert: "insert"}, {Update: "update"}, {Delete: "delete"}));
 
 appbase_plugin_requires!(MySqlPlugin; JsonRpcPlugin);
+
+impl MySqlPlugin {
+    pub fn create_table(&self, sql_files: Vec<&str>) {
+        let connection = Arc::clone(self.pool.as_ref().unwrap());
+        for sql_file in sql_files.into_iter() {
+            let query = fs::read_to_string(sql_file).unwrap();
+            let result = connection.lock().unwrap().get_conn().unwrap().exec_drop(query, ());
+            match result {
+                Ok(_) => {}
+                Err(err) => {
+                    println!("error={:?}", err);
+                }
+            }
+        }
+    }
+}
 
 impl Plugin for MySqlPlugin {
     appbase_plugin_default!(MySqlPlugin);
