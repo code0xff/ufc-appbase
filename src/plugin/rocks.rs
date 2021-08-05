@@ -54,10 +54,6 @@ impl Plugin for RocksPlugin {
     }
 
     fn initialize(&mut self) {
-        if !self.plugin_initialize() {
-            return;
-        }
-
         self.db = Some(Arc::new(DB::open_default("rocks").unwrap()));
         self.monitor = Some(app::subscribe_channel(String::from("rocks")));
 
@@ -79,9 +75,6 @@ impl Plugin for RocksPlugin {
     }
 
     fn startup(&mut self) {
-        if !self.plugin_startup() {
-            return;
-        }
         let monitor = Arc::clone(self.monitor.as_ref().unwrap());
         let db = Arc::clone(self.db.as_ref().unwrap());
         tokio::spawn(async move {
@@ -106,9 +99,5 @@ impl Plugin for RocksPlugin {
         });
     }
 
-    fn shutdown(&mut self) {
-        if !self.plugin_shutdown() {
-            return;
-        }
-    }
+    fn shutdown(&mut self) {}
 }

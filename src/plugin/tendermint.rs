@@ -15,7 +15,7 @@ use crate::libs::mysql::insert_query;
 use crate::libs::rocks::{get_by_prefix_static, get_static};
 use crate::libs::serde::{get_array, get_object, get_str, get_string, pick};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
-use crate::plugin::mysql::{MySqlMethod, MySqlMsg, MySqlPlugin};
+use crate::plugin::mysql::{MySqlMsg, MySqlPlugin};
 use crate::plugin::rabbit::RabbitPlugin;
 use crate::plugin::rocks::{RocksMethod, RocksMsg, RocksPlugin};
 use crate::types::channel::MultiChannel;
@@ -41,7 +41,7 @@ type SubscribeEvents = Arc<FutureMutex<HashMap<String, SubscribeEvent>>>;
 
 message!((TendermintMsg; {value: Value}); (TendermintMethod; {Subscribe: "subscribe"}, {Unsubscribe: "unsubscribe"}));
 
-appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, RocksPlugin);
+appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, RocksPlugin, MySqlPlugin);
 
 impl TendermintPlugin {
     fn init(&mut self) {
@@ -189,9 +189,6 @@ impl Plugin for TendermintPlugin {
     }
 
     fn initialize(&mut self) {
-        if !self.plugin_initialize() {
-            return;
-        }
         self.init();
         self.register_jsonrpc();
         self.create_table();
@@ -199,9 +196,6 @@ impl Plugin for TendermintPlugin {
     }
 
     fn startup(&mut self) {
-        if !self.plugin_startup() {
-            return;
-        }
         let monitor = Arc::clone(self.monitor.as_ref().unwrap());
         let sub_events = Arc::clone(self.sub_events.as_ref().unwrap());
 
@@ -303,7 +297,7 @@ impl Plugin for TendermintPlugin {
                                     let query = insert_query("tm_block", column.clone());
                                     let values = pick(header_object, column.clone());
                                     if values.is_ok() {
-                                        let mysql_msg = MySqlMsg::new(MySqlMethod::Insert, String::from(query), Value::Object(values.unwrap()));
+                                        let mysql_msg = MySqlMsg::new(String::from(query), Value::Object(values.unwrap()));
                                         let _ = mysql_channel.lock().unwrap().send(mysql_msg);
                                     } else {
                                         println!("{}", values.unwrap_err());
@@ -412,7 +406,7 @@ impl Plugin for TendermintPlugin {
                                             let query = insert_query("tm_tx", column.clone());
                                             let values = pick(tx_object, column.clone());
                                             if values.is_ok() {
-                                                let mysql_msg = MySqlMsg::new(MySqlMethod::Insert, String::from(query), Value::Object(values.unwrap()));
+                                                let mysql_msg = MySqlMsg::new(String::from(query), Value::Object(values.unwrap()));
                                                 let _ = mysql_channel.lock().unwrap().send(mysql_msg);
                                             } else {
                                                 println!("{}", values.unwrap_err());
@@ -439,9 +433,5 @@ impl Plugin for TendermintPlugin {
         });
     }
 
-    fn shutdown(&mut self) {
-        if !self.plugin_shutdown() {
-            return;
-        }
-    }
+    fn shutdown(&mut self) {}
 }

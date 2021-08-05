@@ -1,4 +1,3 @@
-use jsonrpc_core::serde_json::Number;
 use serde_json::{Map, Value};
 
 pub fn pick(params: &Map<String, Value>, names: Vec<&str>) -> Result<Map<String, Value>, String> {

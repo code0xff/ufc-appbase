@@ -28,19 +28,12 @@ impl Plugin for RabbitPlugin {
     }
 
     fn initialize(&mut self) {
-        if !self.plugin_initialize() {
-            return;
-        }
-
         let rabbit_mq_url = environment::string("RABBIT_MQ_URL").unwrap();
         self.conn = Some(Arc::new(FutureMutex::new(Connection::insecure_open(rabbit_mq_url.as_str()).unwrap())));
         self.monitor = Some(app::subscribe_channel(String::from("rabbit")));
     }
 
     fn startup(&mut self) {
-        if !self.plugin_startup() {
-            return;
-        }
         let monitor = Arc::clone(self.monitor.as_ref().unwrap());
         let conn = Arc::clone(self.conn.as_ref().unwrap());
         tokio::spawn(async move {
@@ -56,9 +49,5 @@ impl Plugin for RabbitPlugin {
         });
     }
 
-    fn shutdown(&mut self) {
-        if !self.plugin_shutdown() {
-            return;
-        }
-    }
+    fn shutdown(&mut self) {}
 }

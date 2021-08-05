@@ -7,12 +7,11 @@ use mysql::prelude::Queryable;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::{enumeration, message};
+use crate::{message};
 use crate::libs::environment;
 use crate::libs::mysql::get_params;
 use crate::libs::serde::{get_object, get_str};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
-use crate::types::enumeration::Enumeration;
 
 pub struct MySqlPlugin {
     base: PluginBase,
@@ -22,7 +21,7 @@ pub struct MySqlPlugin {
 
 type MySqlPool = Arc<Mutex<Pool>>;
 
-message!((MySqlMsg; {query: String}, {value: Value}); (MySqlMethod; {Insert: "insert"}, {Update: "update"}, {Delete: "delete"}));
+message!(MySqlMsg; {query: String}, {value: Value});
 
 appbase_plugin_requires!(MySqlPlugin; JsonRpcPlugin);
 
@@ -54,9 +53,6 @@ impl Plugin for MySqlPlugin {
     }
 
     fn initialize(&mut self) {
-        if !self.plugin_initialize() {
-            return;
-        }
         let mysql_url = environment::string("MYSQL_URL").unwrap();
         let opts = Opts::from_url(mysql_url.as_str()).unwrap();
         let pool = Pool::new(opts).unwrap();
@@ -65,9 +61,6 @@ impl Plugin for MySqlPlugin {
     }
 
     fn startup(&mut self) {
-        if !self.plugin_startup() {
-            return;
-        }
         let monitor = Arc::clone(self.monitor.as_ref().unwrap());
         let pool = Arc::clone(self.pool.as_ref().unwrap());
         tokio::spawn(async move {
@@ -75,28 +68,17 @@ impl Plugin for MySqlPlugin {
             loop {
                 if let Ok(msg) = locked_monitor.try_recv() {
                     let parsed_msg = msg.as_object().unwrap();
-                    let method = MySqlMethod::find(get_str(parsed_msg, "method").unwrap()).unwrap();
-                    match method {
-                        MySqlMethod::Insert => {
-                            let query = get_str(parsed_msg, "query").unwrap();
-                            let value = get_object(parsed_msg, "value").unwrap();
-                            let params = get_params(value);
-                            let result = pool.lock().unwrap().get_conn().unwrap().exec_drop(query, params);
-                            if result.is_err() {
-                                println!("{}", result.unwrap_err());
-                            }
-                        }
-                        MySqlMethod::Update => {}
-                        MySqlMethod::Delete => {}
-                    };
+                    let query = get_str(parsed_msg, "query").unwrap();
+                    let value = get_object(parsed_msg, "value").unwrap();
+                    let params = get_params(value);
+                    let result = pool.lock().unwrap().get_conn().unwrap().exec_drop(query, params);
+                    if result.is_err() {
+                        println!("{}", result.unwrap_err());
+                    }
                 }
             }
         });
     }
 
-    fn shutdown(&mut self) {
-        if !self.plugin_shutdown() {
-            return;
-        }
-    }
+    fn shutdown(&mut self) {}
 }
