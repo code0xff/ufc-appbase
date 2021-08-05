@@ -59,16 +59,10 @@ impl Plugin for EmailPlugin {
     }
 
     fn initialize(&mut self) {
-        if !self.plugin_initialize() {
-            return;
-        }
         self.monitor = Some(app::subscribe_channel(String::from("email")));
     }
 
     fn startup(&mut self) {
-        if !self.plugin_startup() {
-            return;
-        }
         let monitor = Arc::clone(self.monitor.as_ref().unwrap());
         tokio::spawn(async move {
             let mut mon_lock = monitor.lock().await;
@@ -102,9 +96,5 @@ impl Plugin for EmailPlugin {
         });
     }
 
-    fn shutdown(&mut self) {
-        if !self.plugin_shutdown() {
-            return;
-        }
-    }
+    fn shutdown(&mut self) {}
 }

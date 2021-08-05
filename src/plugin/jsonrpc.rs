@@ -53,18 +53,10 @@ impl Plugin for JsonRpcPlugin {
     }
 
     fn initialize(&mut self) {
-        if !self.plugin_initialize() {
-            return;
-        }
-
         self.io = Some(IoHandler::new());
     }
 
     fn startup(&mut self) {
-        if !self.plugin_startup() {
-            return;
-        }
-
         let io = std::mem::replace(&mut self.io, None).unwrap();
         let created_server = ServerBuilder::new(io);
         let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
@@ -78,10 +70,6 @@ impl Plugin for JsonRpcPlugin {
     }
 
     fn shutdown(&mut self) {
-        if !self.plugin_shutdown() {
-            return;
-        }
-
         if self.server.is_some() {
             let server = std::mem::replace(&mut self.server, None).unwrap();
             server.close();

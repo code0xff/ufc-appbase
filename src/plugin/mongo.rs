@@ -32,10 +32,6 @@ impl Plugin for MongoPlugin {
     }
 
     fn initialize(&mut self) {
-        if !self.plugin_initialize() {
-            return;
-        }
-
         let mut client_opts = executor::block_on(async { ClientOptions::parse("mongodb://localhost:27017").await }).unwrap();
         client_opts.app_name = Some(String::from("MongoDB"));
         let client = Client::with_options(client_opts).unwrap();
@@ -44,9 +40,6 @@ impl Plugin for MongoPlugin {
     }
 
     fn startup(&mut self) {
-        if !self.plugin_startup() {
-            return;
-        }
         let monitor = Arc::clone(self.monitor.as_ref().unwrap());
         let db = Arc::clone(self.db.as_ref().unwrap());
         tokio::spawn(async move {
@@ -67,9 +60,5 @@ impl Plugin for MongoPlugin {
         });
     }
 
-    fn shutdown(&mut self) {
-        if !self.plugin_shutdown() {
-            return;
-        }
-    }
+    fn shutdown(&mut self) {}
 }
