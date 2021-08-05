@@ -11,12 +11,18 @@ pub fn insert_query(table: &str, mut column: Vec<&str>) -> String {
 pub fn get_params(params: &Map<String, Value>) -> mysql::Params {
     let mut vec: Vec<(String, mysql::Value)> = Vec::new();
     for (key, value) in params.iter() {
-        if value.as_str().is_some() {
-            vec.push((key.clone(), mysql::Value::Bytes(value.as_str().unwrap().as_bytes().to_vec())));
-        } else if value.as_u64().is_some() {
+        if value.is_u64() {
             vec.push((key.clone(), mysql::Value::UInt(value.as_u64().unwrap())));
-        } else {
+        } else if value.is_i64() {
+            vec.push((key.clone(), mysql::Value::Int(value.as_i64().unwrap())));
+        } else if value.is_f64() {
+            vec.push((key.clone(), mysql::Value::Double(value.as_f64().unwrap())));
+        } else if value.is_null() {
             vec.push((key.clone(), mysql::Value::NULL));
+        } else if value.is_null() {
+            vec.push((key.clone(), mysql::Value::NULL));
+        } else {
+            vec.push((key.clone(), mysql::Value::Bytes(value.to_string().as_bytes().to_vec())));
         }
     }
     mysql::Params::from(vec)
