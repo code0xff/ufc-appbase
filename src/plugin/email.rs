@@ -11,7 +11,6 @@ use crate::message;
 use crate::libs::serde::get_str;
 
 pub struct EmailPlugin {
-    base: PluginBase,
     monitor: Option<SubscribeHandle>,
 }
 
@@ -49,11 +48,8 @@ impl EmailPlugin {
 }
 
 impl Plugin for EmailPlugin {
-    appbase_plugin_default!(EmailPlugin);
-
     fn new() -> Self {
         EmailPlugin {
-            base: PluginBase::new(),
             monitor: None,
         }
     }
@@ -64,37 +60,49 @@ impl Plugin for EmailPlugin {
 
     fn startup(&mut self) {
         let monitor = Arc::clone(self.monitor.as_ref().unwrap());
-        tokio::spawn(async move {
-            let mut mon_lock = monitor.lock().await;
-            loop {
-                if let Ok(msg) = mon_lock.try_recv() {
-                    let parsed_msg = msg.as_object().unwrap();
-                    let parsed_to = get_str(parsed_msg, "to");
-                    if parsed_to.is_err() {
-                        println!("{}", parsed_to.clone().unwrap_err());
-                        continue;
-                    }
-                    let to = parsed_to.unwrap();
-
-                    let parsed_subject = get_str(parsed_msg, "subject");
-                    if parsed_subject.is_err() {
-                        println!("{}", parsed_subject.clone().unwrap_err());
-                        continue;
-                    }
-                    let subject = parsed_subject.unwrap();
-
-                    let parsed_body = get_str(parsed_msg, "body");
-                    if parsed_body.is_err() {
-                        println!("{}", parsed_body.clone().unwrap_err());
-                        continue;
-                    }
-                    let body = parsed_body.unwrap();
-
-                    Self::send(to, subject, body);
-                }
-            }
-        });
+        let app = app::quit_handle().unwrap();
+        EmailPlugin::recv(monitor, app);
     }
 
     fn shutdown(&mut self) {}
+}
+
+impl EmailPlugin {
+    fn recv(monitor: SubscribeHandle, app: QuitHandle) {
+        tokio::spawn(async move {
+            loop {
+                if let Some(mut mon_lock) = monitor.try_lock() {
+                    if let Ok(msg) = mon_lock.try_recv() {
+                        let parsed_msg = msg.as_object().unwrap();
+                        let parsed_to = get_str(parsed_msg, "to");
+                        if parsed_to.is_err() {
+                            println!("{}", parsed_to.clone().unwrap_err());
+                            break;
+                        }
+                        let to = parsed_to.unwrap();
+
+                        let parsed_subject = get_str(parsed_msg, "subject");
+                        if parsed_subject.is_err() {
+                            println!("{}", parsed_subject.clone().unwrap_err());
+                            break;
+                        }
+                        let subject = parsed_subject.unwrap();
+
+                        let parsed_body = get_str(parsed_msg, "body");
+                        if parsed_body.is_err() {
+                            println!("{}", parsed_body.clone().unwrap_err());
+                            break;
+                        }
+                        let body = parsed_body.unwrap();
+
+                        Self::send(to, subject, body);
+                    }
+                }
+                break;
+            }
+            if !app.is_quiting() {
+                EmailPlugin::recv(monitor, app);
+            }
+        });
+    }
 }
