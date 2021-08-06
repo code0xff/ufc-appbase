@@ -1,5 +1,4 @@
 use std::fs;
-use std::sync::{Arc, Mutex};
 
 use appbase::*;
 use mysql::*;
@@ -14,12 +13,11 @@ use crate::libs::serde::{get_object, get_str};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 
 pub struct MySqlPlugin {
-    base: PluginBase,
     pool: Option<MySqlPool>,
     monitor: Option<SubscribeHandle>,
 }
 
-type MySqlPool = Arc<Mutex<Pool>>;
+type MySqlPool = Pool;
 
 message!(MySqlMsg; {query: String}, {value: Value});
 
@@ -27,10 +25,10 @@ appbase_plugin_requires!(MySqlPlugin; JsonRpcPlugin);
 
 impl MySqlPlugin {
     pub fn create_table(&self, sql_files: Vec<&str>) {
-        let connection = Arc::clone(self.pool.as_ref().unwrap());
+        let pool = self.pool.as_ref().unwrap();
         for sql_file in sql_files.into_iter() {
             let query = fs::read_to_string(sql_file).unwrap();
-            let result = connection.lock().unwrap().get_conn().unwrap().exec_drop(query, ());
+            let result = pool.get_conn().unwrap().exec_drop(query, ());
             match result {
                 Ok(_) => {}
                 Err(err) => {
@@ -42,11 +40,8 @@ impl MySqlPlugin {
 }
 
 impl Plugin for MySqlPlugin {
-    appbase_plugin_default!(MySqlPlugin);
-
     fn new() -> Self {
         MySqlPlugin {
-            base: PluginBase::new(),
             monitor: None,
             pool: None,
         }
@@ -56,29 +51,38 @@ impl Plugin for MySqlPlugin {
         let mysql_url = environment::string("MYSQL_URL").unwrap();
         let opts = Opts::from_url(mysql_url.as_str()).unwrap();
         let pool = Pool::new(opts).unwrap();
-        self.pool = Some(Arc::new(Mutex::new(pool)));
+        self.pool = Some(pool);
         self.monitor = Some(app::subscribe_channel(String::from("mysql")));
     }
 
     fn startup(&mut self) {
-        let monitor = Arc::clone(self.monitor.as_ref().unwrap());
-        let pool = Arc::clone(self.pool.as_ref().unwrap());
+        let pool = self.pool.as_ref().unwrap().clone();
+        let monitor = self.monitor.as_ref().unwrap().clone();
+        let app = app::quit_handle().unwrap();
+        MySqlPlugin::recv(pool, monitor, app);
+    }
+
+    fn shutdown(&mut self) {}
+}
+
+impl MySqlPlugin {
+    fn recv(pool: Pool, monitor: SubscribeHandle, app: QuitHandle) {
         tokio::spawn(async move {
-            let mut locked_monitor = monitor.lock().await;
-            loop {
-                if let Ok(msg) = locked_monitor.try_recv() {
+            if let Some(mut mon_lock) = monitor.try_lock() {
+                if let Ok(msg) = mon_lock.try_recv() {
                     let parsed_msg = msg.as_object().unwrap();
                     let query = get_str(parsed_msg, "query").unwrap();
                     let value = get_object(parsed_msg, "value").unwrap();
                     let params = get_params(value);
-                    let result = pool.lock().unwrap().get_conn().unwrap().exec_drop(query, params);
+                    let result = pool.get_conn().unwrap().exec_drop(query, params);
                     if result.is_err() {
                         println!("{}", result.unwrap_err());
                     }
                 }
             }
+            if !app.is_quiting() {
+                MySqlPlugin::recv(pool, monitor, app);
+            }
         });
     }
-
-    fn shutdown(&mut self) {}
 }

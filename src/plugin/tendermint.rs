@@ -15,9 +15,8 @@ use crate::libs::mysql::insert_query;
 use crate::libs::rocks::{get_by_prefix_static, get_static};
 use crate::libs::serde::{get_array, get_object, get_str, get_string, pick};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
-use crate::plugin::mongo::{MongoMsg, MongoPlugin};
+use crate::plugin::mongo::MongoMsg;
 use crate::plugin::mysql::{MySqlMsg, MySqlPlugin};
-use crate::plugin::rabbit::RabbitPlugin;
 use crate::plugin::rocks::{RocksMethod, RocksMsg, RocksPlugin};
 use crate::types::channel::MultiChannel;
 use crate::types::enumeration::Enumeration;
@@ -25,7 +24,6 @@ use crate::types::subscribe::{SubscribeEvent, SubscribeTarget, SubscribeTask};
 use crate::validation::{get_task, subscribe, unsubscribe};
 
 pub struct TendermintPlugin {
-    base: PluginBase,
     sub_events: Option<SubscribeEvents>,
     channels: Option<MultiChannel>,
     monitor: Option<SubscribeHandle>,
@@ -178,11 +176,8 @@ impl TendermintPlugin {
 }
 
 impl Plugin for TendermintPlugin {
-    appbase_plugin_default!(TendermintPlugin);
-
     fn new() -> Self {
         TendermintPlugin {
-            base: PluginBase::new(),
             sub_events: None,
             channels: None,
             monitor: None,
@@ -216,11 +211,19 @@ impl Plugin for TendermintPlugin {
         let tm_tx_mongo_sync = self.tm_tx_mongo_sync.unwrap();
         let tm_block_publish = self.tm_block_publish.unwrap();
         let tm_tx_publish = self.tm_tx_publish.unwrap();
-        tokio::spawn(async move {
-            let mut mon_lock = monitor.lock().await;
+        let app = app::quit_handle().unwrap();
+        tokio::task::spawn_blocking(move || {
+            let mut mon_lock = monitor.try_lock().unwrap();
             loop {
+                if app.is_quiting() {
+                    break;
+                }
                 thread::sleep(Duration::from_secs(1));
-                let mut sub_events_lock = sub_events.lock().await;
+                let sub_events_try_lock = sub_events.try_lock();
+                if sub_events_try_lock.is_none() {
+                    continue;
+                }
+                let mut sub_events_lock = sub_events_try_lock.unwrap();
                 if let Ok(msg) = mon_lock.try_recv() {
                     let parsed_msg = msg.as_object().unwrap();
                     let method = TendermintMethod::find(get_str(parsed_msg, "method").unwrap()).unwrap();
@@ -250,7 +253,7 @@ impl Plugin for TendermintPlugin {
                             SubscribeTarget::Block => {
                                 let node_index = usize::from(sub_event.node_idx);
                                 let req_url = format!("{}/blocks/{}", sub_event.nodes[node_index], sub_event.curr_height);
-                                let res_result = reqwest::get(req_url).await;
+                                let res_result = reqwest::blocking::get(req_url);
 
                                 let res = match res_result {
                                     Ok(res) => res,
@@ -261,7 +264,7 @@ impl Plugin for TendermintPlugin {
                                 };
 
                                 let status = res.status().clone();
-                                let res_body = res.text().await;
+                                let res_body = res.text();
                                 let body_str = match res_body {
                                     Ok(body_str) => body_str,
                                     Err(err) => {
@@ -326,7 +329,7 @@ impl Plugin for TendermintPlugin {
                             SubscribeTarget::Tx => {
                                 let node_idx = usize::from(sub_event.node_idx);
                                 let latest_req_url = format!("{}/blocks/latest", sub_event.nodes[node_idx]);
-                                let res_result = reqwest::get(latest_req_url).await;
+                                let res_result = reqwest::blocking::get(latest_req_url);
                                 let res = match res_result {
                                     Ok(res) => res,
                                     Err(err) => {
@@ -334,7 +337,7 @@ impl Plugin for TendermintPlugin {
                                         continue;
                                     }
                                 };
-                                let res_body = res.text().await;
+                                let res_body = res.text();
                                 let body: Map<String, Value> = match res_body {
                                     Ok(body) => serde_json::from_str(body.as_str()).unwrap(),
                                     Err(err) => {
@@ -376,7 +379,7 @@ impl Plugin for TendermintPlugin {
 
                                 loop {
                                     let req_url = format!("{}/txs?page={}&limit=100&tx.height={}", sub_event.nodes[node_index], curr_page, sub_event.curr_height);
-                                    let res_result = reqwest::get(req_url).await;
+                                    let res_result = reqwest::blocking::get(req_url);
 
                                     let res = match res_result {
                                         Ok(res) => res,
@@ -386,7 +389,7 @@ impl Plugin for TendermintPlugin {
                                         }
                                     };
                                     let status = res.status().clone();
-                                    let res_body = res.text().await;
+                                    let res_body = res.text();
 
                                     let body: Map<String, Value> = match res_body {
                                         Ok(body) => serde_json::from_str(body.as_str()).unwrap(),
