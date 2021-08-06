@@ -25,7 +25,8 @@ macro_rules! message {
         }
 
         impl $message {
-           pub fn new($($message_names: $message_types,)*) -> Value {
+            #[allow(dead_code)]
+            pub fn new($($message_names: $message_types,)*) -> Value {
                 json!(Self {
                     $($message_names,)*
                 })

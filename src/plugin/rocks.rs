@@ -13,7 +13,6 @@ use crate::types::enumeration::Enumeration;
 use crate::validation::find_by_key;
 
 pub struct RocksPlugin {
-    base: PluginBase,
     db: Option<RocksDB>,
     monitor: Option<SubscribeHandle>,
 }
@@ -36,18 +35,15 @@ impl RocksPlugin {
     }
 
     pub fn get_db(&self) -> Arc<DBWithThreadMode<SingleThreaded>> {
-        Arc::clone(self.db.as_ref().unwrap())
+        self.db.as_ref().unwrap().clone()
     }
 }
 
 appbase_plugin_requires!(RocksPlugin; );
 
 impl Plugin for RocksPlugin {
-    appbase_plugin_default!(RocksPlugin);
-
     fn new() -> Self {
         RocksPlugin {
-            base: PluginBase::new(),
             db: None,
             monitor: None,
         }
@@ -61,7 +57,7 @@ impl Plugin for RocksPlugin {
         let mut jsonrpc_plugin = jsonrpc_plugin_handle.lock().unwrap();
         let jsonrpc = jsonrpc_plugin.downcast_mut::<JsonRpcPlugin>().unwrap();
 
-        let db = Arc::clone(self.db.as_ref().unwrap());
+        let db = self.db.as_ref().unwrap().clone();
         jsonrpc.add_method(String::from("find_by_key"), move |params: Params| {
             let params: Map<String, Value> = params.parse().unwrap();
             let verified = find_by_key::verify(&params);
@@ -75,11 +71,19 @@ impl Plugin for RocksPlugin {
     }
 
     fn startup(&mut self) {
-        let monitor = Arc::clone(self.monitor.as_ref().unwrap());
-        let db = Arc::clone(self.db.as_ref().unwrap());
+        let db = self.db.as_ref().unwrap().clone();
+        let monitor = self.monitor.as_ref().unwrap().clone();
+        let app = app::quit_handle().unwrap();
+        RocksPlugin::recv(db, monitor, app);
+    }
+
+    fn shutdown(&mut self) {}
+}
+
+impl RocksPlugin {
+    fn recv(db: RocksDB, monitor: SubscribeHandle, app: QuitHandle) {
         tokio::spawn(async move {
-            let mut mon_lock = monitor.lock().await;
-            loop {
+            if let Some(mut mon_lock) = monitor.try_lock() {
                 if let Ok(msg) = mon_lock.try_recv() {
                     let parsed_msg = msg.as_object().unwrap();
                     let method = RocksMethod::find(parsed_msg.get("method").unwrap().as_str().unwrap()).unwrap();
@@ -96,8 +100,9 @@ impl Plugin for RocksPlugin {
                     }
                 }
             }
+            if !app.is_quiting() {
+                RocksPlugin::recv(db, monitor, app);
+            }
         });
     }
-
-    fn shutdown(&mut self) {}
 }
