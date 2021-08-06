@@ -1,13 +1,6 @@
 use jsonrpc_core::Value;
 use serde_json::Map;
 
-pub fn insert_query(table: &str, mut column: Vec<&str>) -> String {
-    let columns = column.join(", ");
-    let converted: Vec<String> = column.iter_mut().map(|v| { format!(":{}", v) }).collect();
-    let values = converted.join(", ");
-    format!("insert into {} ({}) values ({})", table, columns, values)
-}
-
 pub fn get_params(params: &Map<String, Value>) -> mysql::Params {
     let mut vec: Vec<(String, mysql::Value)> = Vec::new();
     for (key, value) in params.iter() {
@@ -17,8 +10,6 @@ pub fn get_params(params: &Map<String, Value>) -> mysql::Params {
             vec.push((key.clone(), mysql::Value::Int(value.as_i64().unwrap())));
         } else if value.is_f64() {
             vec.push((key.clone(), mysql::Value::Double(value.as_f64().unwrap())));
-        } else if value.is_null() {
-            vec.push((key.clone(), mysql::Value::NULL));
         } else if value.is_null() {
             vec.push((key.clone(), mysql::Value::NULL));
         } else if value.is_string() {
