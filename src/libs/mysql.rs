@@ -21,6 +21,8 @@ pub fn get_params(params: &Map<String, Value>) -> mysql::Params {
             vec.push((key.clone(), mysql::Value::NULL));
         } else if value.is_null() {
             vec.push((key.clone(), mysql::Value::NULL));
+        } else if value.is_string() {
+            vec.push((key.clone(), mysql::Value::Bytes(value.as_str().unwrap().as_bytes().to_vec())));
         } else {
             vec.push((key.clone(), mysql::Value::Bytes(value.to_string().as_bytes().to_vec())));
         }

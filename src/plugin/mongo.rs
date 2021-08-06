@@ -10,11 +10,9 @@ use crate::{libs, message};
 use crate::libs::serde::{get_object, get_str};
 
 pub struct MongoPlugin {
-    db: Option<MongoDB>,
+    db: Option<Database>,
     monitor: Option<SubscribeHandle>,
 }
-
-type MongoDB = Database;
 
 appbase_plugin_requires!(MongoPlugin; );
 
@@ -29,7 +27,8 @@ impl Plugin for MongoPlugin {
     }
 
     fn initialize(&mut self) {
-        let mut client_opts = executor::block_on(async { ClientOptions::parse("mongodb://root:mongodb@localhost:27017").await }).unwrap();
+        let mongo_url = libs::environment::string("MONGO_URL").unwrap();
+        let mut client_opts = executor::block_on(async { ClientOptions::parse(mongo_url).await }).unwrap();
         client_opts.app_name = Some(String::from("MongoDB"));
         let client = Client::with_options(client_opts).unwrap();
         self.db = Some(client.database("ufc"));
@@ -40,14 +39,14 @@ impl Plugin for MongoPlugin {
         let db = self.db.as_ref().unwrap().clone();
         let monitor = self.monitor.as_ref().unwrap().clone();
         let app = app::quit_handle().unwrap();
-        MongoPlugin::recv(db, monitor, app);
+        Self::recv(db, monitor, app);
     }
 
     fn shutdown(&mut self) {}
 }
 
 impl MongoPlugin {
-    fn recv(db: MongoDB, monitor: SubscribeHandle, app: QuitHandle) {
+    fn recv(db: Database, monitor: SubscribeHandle, app: QuitHandle) {
         tokio::spawn(async move {
             if let Some(mut mon_lock) = monitor.try_lock() {
                 if let Ok(msg) = mon_lock.try_recv() {
@@ -57,11 +56,14 @@ impl MongoPlugin {
 
                     let collection = db.collection::<Document>(collection_name);
                     let document = libs::mongo::get_doc(value);
-                    let _ = collection.insert_one(document.clone(), None).await;
+                    let result = collection.insert_one(document.clone(), None).await;
+                    if let Err(err) = result {
+                        println!("mongo_error={:?}", err);
+                    }
                 }
             }
             if !app.is_quiting() {
-                MongoPlugin::recv(db, monitor, app);
+                Self::recv(db, monitor, app);
             }
         });
     }
