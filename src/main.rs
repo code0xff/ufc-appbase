@@ -6,6 +6,7 @@ mod plugin;
 mod types;
 mod validation;
 mod libs;
+mod error;
 
 #[tokio::main]
 async fn main() {

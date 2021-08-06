@@ -1,5 +1,3 @@
-use std::fs;
-
 use appbase::*;
 use mysql::*;
 use mysql::prelude::Queryable;
@@ -68,17 +66,11 @@ impl MySqlPlugin {
         });
     }
 
-    pub fn create_table(&self, sql_files: Vec<&str>) {
+    pub fn execute_query(&self, query: String) {
         let pool = self.pool.as_ref().unwrap();
-        for sql_file in sql_files.into_iter() {
-            let query = fs::read_to_string(sql_file).unwrap();
-            let result = pool.get_conn().unwrap().exec_drop(query, ());
-            match result {
-                Ok(_) => {}
-                Err(err) => {
-                    println!("mysql_error={:?}", err);
-                }
-            }
+        let result = pool.get_conn().unwrap().exec_drop(query, ());
+        if let Err(err) = result {
+            println!("mysql_error={:?}", err);
         }
     }
 }

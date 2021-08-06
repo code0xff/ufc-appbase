@@ -1,7 +1,7 @@
+use std::{fs, thread};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
 
 use appbase::*;
@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use crate::{enumeration, libs, message};
-use crate::libs::mysql::insert_query;
 use crate::libs::rocks::{get_by_prefix_static, get_static};
 use crate::libs::serde::{get_array, get_object, get_str, get_string, pick};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
@@ -20,6 +19,7 @@ use crate::plugin::mysql::{MySqlMsg, MySqlPlugin};
 use crate::plugin::rocks::{RocksMethod, RocksMsg, RocksPlugin};
 use crate::types::channel::MultiChannel;
 use crate::types::enumeration::Enumeration;
+use crate::types::mysql::Schema;
 use crate::types::subscribe::{SubscribeEvent, SubscribeTarget, SubscribeTask};
 use crate::validation::{get_task, subscribe, unsubscribe};
 
@@ -27,6 +27,7 @@ pub struct TendermintPlugin {
     sub_events: Option<SubscribeEvents>,
     channels: Option<MultiChannel>,
     monitor: Option<SubscribeHandle>,
+    schema: Option<HashMap<String, Schema>>,
     tm_block_mysql_sync: Option<bool>,
     tm_tx_mysql_sync: Option<bool>,
     tm_block_mongo_sync: Option<bool>,
@@ -50,6 +51,7 @@ impl Plugin for TendermintPlugin {
             sub_events: None,
             channels: None,
             monitor: None,
+            schema: None,
             tm_block_mysql_sync: None,
             tm_tx_mysql_sync: None,
             tm_block_mongo_sync: None,
@@ -62,6 +64,7 @@ impl Plugin for TendermintPlugin {
     fn initialize(&mut self) {
         self.init();
         self.register_jsonrpc();
+        // self.load_schema();
         self.load_tasks();
     }
 
@@ -81,6 +84,8 @@ impl Plugin for TendermintPlugin {
         let tm_block_publish = self.tm_block_publish.unwrap();
         let tm_tx_publish = self.tm_tx_publish.unwrap();
         let app = app::quit_handle().unwrap();
+
+        let schema = self.schema.as_ref().unwrap().clone();
         tokio::task::spawn_blocking(move || {
             let mut mon_lock = monitor.try_lock().unwrap();
             loop {
@@ -174,11 +179,11 @@ impl Plugin for TendermintPlugin {
 
                                 if tm_block_mysql_sync {
                                     let header_object = header.as_object().unwrap();
-                                    let column = vec!["chain_id", "height", "time", "last_commit_hash", "data_hash", "validators_hash", "next_validators_hash", "consensus_hash", "app_hash", "last_results_hash", "evidence_hash", "proposer_address"];
-                                    let query = insert_query("tm_block", column.clone());
-                                    let values = pick(header_object, column.clone());
+                                    let selected_schema = schema.get("tm_block").unwrap().clone();
+                                    let insert_query = selected_schema.insert_query;
+                                    let values = pick(header_object, vec!["chain_id", "height", "time", "last_commit_hash", "data_hash", "validators_hash", "next_validators_hash", "consensus_hash", "app_hash", "last_results_hash", "evidence_hash", "proposer_address"]);
                                     if values.is_ok() {
-                                        let mysql_msg = MySqlMsg::new(String::from(query), Value::Object(values.unwrap()));
+                                        let mysql_msg = MySqlMsg::new(String::from(insert_query), Value::Object(values.unwrap()));
                                         let _ = mysql_channel.lock().unwrap().send(mysql_msg);
                                     } else {
                                         println!("{}", values.unwrap_err());
@@ -287,11 +292,12 @@ impl Plugin for TendermintPlugin {
 
                                         if tm_tx_mysql_sync {
                                             let tx_object = tx.as_object().unwrap();
-                                            let column = vec!["txhash", "height", "gas_wanted", "gas_used", "raw_log", "timestamp"];
-                                            let query = insert_query("tm_tx", column.clone());
-                                            let values = pick(tx_object, column.clone());
+                                            let selected_schema = schema.get("tm_tx").unwrap().clone();
+                                            let insert_query = selected_schema.insert_query;
+
+                                            let values = pick(tx_object, vec!["txhash", "height", "gas_wanted", "gas_used", "raw_log", "timestamp"]);
                                             if values.is_ok() {
-                                                let mysql_msg = MySqlMsg::new(String::from(query), Value::Object(values.unwrap()));
+                                                let mysql_msg = MySqlMsg::new(String::from(insert_query), Value::Object(values.unwrap()));
                                                 let _ = mysql_channel.lock().unwrap().send(mysql_msg);
                                             } else {
                                                 println!("{}", values.unwrap_err());
@@ -331,6 +337,7 @@ impl TendermintPlugin {
         let channels = MultiChannel::new(vec!("tendermint", "rocks", "mysql", "rabbit", "mongo"));
         self.channels = Some(channels.to_owned());
         self.monitor = Some(app::subscribe_channel(String::from("tendermint")));
+        self.schema = Some(HashMap::new());
         self.tm_block_mysql_sync = Some(libs::environment::bool("TM_BLOCK_MYSQL_SYNC").unwrap());
         self.tm_tx_mysql_sync = Some(libs::environment::bool("TM_TX_MYSQL_SYNC").unwrap());
         self.tm_block_mongo_sync = Some(libs::environment::bool("TM_BLOCK_MONGO_SYNC").unwrap());
@@ -339,16 +346,23 @@ impl TendermintPlugin {
         self.tm_tx_publish = Some(libs::environment::bool("TM_TX_RABBIT_MQ_PUBLISH").unwrap());
     }
 
-    fn create_table(&self) {
+    fn load_schema(&mut self) {
+        let json_str = fs::read_to_string("schema/mysql.json").unwrap();
+        let json_schema: Value = serde_json::from_str(json_str.as_str()).unwrap();
+        let schema_map = json_schema.as_object().unwrap();
+
+        let schema = self.schema.as_mut().unwrap();
+        for (table, values) in schema_map {
+            let created_schema = Schema::from(table.clone(), values).unwrap();
+            schema.insert(table.clone(), created_schema);
+        }
+
         let plugin_handle = app::get_plugin::<MySqlPlugin>();
         let mut plugin = plugin_handle.lock().unwrap();
         let mysql = plugin.downcast_mut::<MySqlPlugin>().unwrap();
 
-        if self.tm_block_mysql_sync.unwrap() {
-            mysql.create_table(vec!["table/tm_block.sql"]);
-        }
-        if self.tm_tx_mysql_sync.unwrap() {
-            mysql.create_table(vec!["table/tm_tx.sql"]);
+        for (_, selected_schema) in schema.iter() {
+            mysql.execute(selected_schema.create_table.clone());
         }
     }
 

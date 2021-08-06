@@ -81,18 +81,18 @@ pub fn get_array<'a>(params: &'a Map<String, Value>, name: &'a str) -> Result<&'
     }
 }
 
-// pub fn get_bool(params: &Map<String, Value>, name: &str) -> Result<bool, String> {
-//     let unwrapped = unwrap(params, name);
-//     if unwrapped.is_ok() {
-//         let opt_val = unwrapped.unwrap().as_bool();
-//         match opt_val {
-//             None => Err(format!("{} is not {}", name, "bool")),
-//             Some(val) => Ok(val),
-//         }
-//     } else {
-//         Err(unwrapped.unwrap_err())
-//     }
-// }
+pub fn get_bool(params: &Map<String, Value>, name: &str) -> Result<bool, String> {
+    let unwrapped = unwrap(params, name);
+    if unwrapped.is_ok() {
+        let opt_val = unwrapped.unwrap().as_bool();
+        match opt_val {
+            None => Err(format!("{} is not {}", name, "bool")),
+            Some(val) => Ok(val),
+        }
+    } else {
+        Err(unwrapped.unwrap_err())
+    }
+}
 
 pub fn get_string_vec(params: &Map<String, Value>, name: &str) -> Vec<String> {
     params.get(name).unwrap().as_array().unwrap().iter().map(|item| { String::from(item.as_str().unwrap()) }).collect()

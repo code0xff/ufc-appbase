@@ -1,0 +1,122 @@
+{
+  "tm_block": {
+    "attributes": {
+      "chain_id": {
+        "type": "varchar",
+        "size": 100,
+        "nullable": true
+      },
+      "height": {
+        "type": "varchar",
+        "size": 100,
+        "nullable": false
+      },
+      "time": {
+        "type": "varchar",
+        "size": 100,
+        "nullable": true
+      },
+      "last_commit_hash": {
+        "type": "varchar",
+        "size": 100,
+        "nullable": true
+      },
+      "data_hash": {
+        "type": "varchar",
+        "size": 100,
+        "nullable": true
+      },
+      "validators_hash": {
+        "type": "varchar",
+        "size": 100,
+        "nullable": true
+      },
+      "next_validators_hash": {
+        "type": "varchar",
+        "size": 100,
+        "nullable": true
+      },
+      "consensus_hash": {
+        "type": "varchar",
+        "size": 100,
+        "nullable": true
+      },
+      "app_hash": {
+        "type": "varchar",
+        "size": 100,
+        "nullable": true
+      },
+      "last_results_hash": {
+        "type": "varchar",
+        "size": 100,
+        "nullable": true
+      },
+      "evidence_hash": {
+        "type": "varchar",
+        "size": 100,
+        "nullable": true
+      },
+      "proposer_address": {
+        "type": "varchar",
+        "size": 100,
+        "nullable": true
+      }
+    },
+    "indexes": [
+      [
+        "height"
+      ]
+    ],
+    "uniques": [
+      [
+        "height"
+      ]
+    ]
+  },
+  "tm_tx": {
+    "attributes": {
+      "txhash": {
+        "type": "varchar",
+        "size": 100,
+        "nullable": false
+      },
+      "height": {
+        "type": "varchar",
+        "size": 100,
+        "nullable": false
+      },
+      "gas_wanted": {
+        "type": "varchar",
+        "size": 100,
+        "nullable": false
+      },
+      "gas_used": {
+        "type": "varchar",
+        "size": 100,
+        "nullable": false
+      },
+      "raw_log": {
+        "type": "text",
+        "nullable": true
+      },
+      "timestamp": {
+        "type": "varchar",
+        "size": 100,
+        "nullable": false
+      }
+    },
+    "indexes": [
+      [
+        "txhash"
+      ],
+      [
+        "height"
+      ]
+    ],
+    "uniques": [
+      [
+        "txhash"
+      ]
+    ]
+  }
+}
