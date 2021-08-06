@@ -6,3 +6,4 @@ pub mod rabbit;
 pub mod mysql;
 pub mod email;
 pub mod slack;
+pub mod telegram;
