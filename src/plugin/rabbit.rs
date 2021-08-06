@@ -33,7 +33,7 @@ impl Plugin for RabbitPlugin {
         let conn = self.conn.as_ref().unwrap().clone();
         let monitor = self.monitor.as_ref().unwrap().clone();
         let app = app::quit_handle().unwrap();
-        RabbitPlugin::recv(conn, monitor, app);
+        Self::recv(conn, monitor, app);
     }
 
     fn shutdown(&mut self) {}
@@ -48,12 +48,15 @@ impl RabbitPlugin {
                     let exchange = Exchange::direct(&channel);
                     if let Ok(msg) = mon_lock.try_recv() {
                         let queue = environment::string("RABBIT_MQ_QUEUE").unwrap();
-                        let _ = exchange.publish(Publish::new(msg.as_str().unwrap().as_bytes(), queue.as_str()));
+                        let result = exchange.publish(Publish::new(msg.as_str().unwrap().as_bytes(), queue.as_str()));
+                        if let Err(err) = result {
+                            println!("rabbit_error={:?}", err);
+                        }
                     }
                 }
             }
             if !app.is_quiting() {
-                RabbitPlugin::recv(conn, monitor, app);
+                Self::recv(conn, monitor, app);
             }
         });
     }

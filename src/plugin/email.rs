@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::libs;
-use crate::message;
 use crate::libs::serde::get_str;
+use crate::message;
 
 pub struct EmailPlugin {
     monitor: Option<SubscribeHandle>,
@@ -18,7 +18,46 @@ message!(EmailMsg; {to: String}, {subject: String}, {body: String});
 
 appbase_plugin_requires!(EmailPlugin; );
 
+impl Plugin for EmailPlugin {
+    fn new() -> Self {
+        EmailPlugin {
+            monitor: None,
+        }
+    }
+
+    fn initialize(&mut self) {
+        self.monitor = Some(app::subscribe_channel(String::from("email")));
+    }
+
+    fn startup(&mut self) {
+        let monitor = Arc::clone(self.monitor.as_ref().unwrap());
+        let app = app::quit_handle().unwrap();
+        Self::recv(monitor, app);
+    }
+
+    fn shutdown(&mut self) {}
+}
+
 impl EmailPlugin {
+    fn recv(monitor: SubscribeHandle, app: QuitHandle) {
+        tokio::spawn(async move {
+            if let Some(mut mon_lock) = monitor.try_lock() {
+                if let Ok(msg) = mon_lock.try_recv() {
+                    let parsed_msg = msg.as_object().unwrap();
+
+                    let to = get_str(parsed_msg, "to").unwrap();
+                    let subject = get_str(parsed_msg, "subject").unwrap();
+                    let body = get_str(parsed_msg, "body").unwrap();
+
+                    Self::send(to, subject, body);
+                }
+            }
+            if !app.is_quiting() {
+                Self::recv(monitor, app);
+            }
+        });
+    }
+
     pub fn send(to: &str, subject: &str, body: &str) {
         let smtp_username = libs::environment::string("SMTP_USERNAME").unwrap();
         let smtp_password = libs::environment::string("SMTP_PASSWORD").unwrap();
@@ -40,69 +79,9 @@ impl EmailPlugin {
             .credentials(credentials)
             .build();
 
-        match mailer.send(&email) {
-            Ok(_) => println!("email sent successfully!"),
-            Err(err) => println!("could not send email: {:?}", err),
+        let result = mailer.send(&email);
+        if let Err(err) = result {
+            println!("email_error={:?}", err);
         }
-    }
-}
-
-impl Plugin for EmailPlugin {
-    fn new() -> Self {
-        EmailPlugin {
-            monitor: None,
-        }
-    }
-
-    fn initialize(&mut self) {
-        self.monitor = Some(app::subscribe_channel(String::from("email")));
-    }
-
-    fn startup(&mut self) {
-        let monitor = Arc::clone(self.monitor.as_ref().unwrap());
-        let app = app::quit_handle().unwrap();
-        EmailPlugin::recv(monitor, app);
-    }
-
-    fn shutdown(&mut self) {}
-}
-
-impl EmailPlugin {
-    fn recv(monitor: SubscribeHandle, app: QuitHandle) {
-        tokio::spawn(async move {
-            loop {
-                if let Some(mut mon_lock) = monitor.try_lock() {
-                    if let Ok(msg) = mon_lock.try_recv() {
-                        let parsed_msg = msg.as_object().unwrap();
-                        let parsed_to = get_str(parsed_msg, "to");
-                        if parsed_to.is_err() {
-                            println!("{}", parsed_to.clone().unwrap_err());
-                            break;
-                        }
-                        let to = parsed_to.unwrap();
-
-                        let parsed_subject = get_str(parsed_msg, "subject");
-                        if parsed_subject.is_err() {
-                            println!("{}", parsed_subject.clone().unwrap_err());
-                            break;
-                        }
-                        let subject = parsed_subject.unwrap();
-
-                        let parsed_body = get_str(parsed_msg, "body");
-                        if parsed_body.is_err() {
-                            println!("{}", parsed_body.clone().unwrap_err());
-                            break;
-                        }
-                        let body = parsed_body.unwrap();
-
-                        Self::send(to, subject, body);
-                    }
-                }
-                break;
-            }
-            if !app.is_quiting() {
-                EmailPlugin::recv(monitor, app);
-            }
-        });
     }
 }

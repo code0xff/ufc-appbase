@@ -17,27 +17,9 @@ pub struct RocksPlugin {
     monitor: Option<SubscribeHandle>,
 }
 
-message!((RocksMsg; {key: String}, {value: Value}); (RocksMethod; {Put: "put"}, {Delete: "delete"}));
-
 type RocksDB = Arc<DBWithThreadMode<SingleThreaded>>;
 
-impl RocksPlugin {
-    pub fn find_by_prefix_static(db: &RocksDB, key: &str) -> Value {
-        let result = db.get(key.as_bytes()).unwrap();
-        match result {
-            None => {
-                Value::Null
-            }
-            Some(value) => {
-                Value::Object(serde_json::from_str(String::from_utf8(value).unwrap().as_str()).unwrap())
-            }
-        }
-    }
-
-    pub fn get_db(&self) -> Arc<DBWithThreadMode<SingleThreaded>> {
-        self.db.as_ref().unwrap().clone()
-    }
-}
+message!((RocksMsg; {key: String}, {value: Value}); (RocksMethod; {Put: "put"}, {Delete: "delete"}));
 
 appbase_plugin_requires!(RocksPlugin; );
 
@@ -74,13 +56,27 @@ impl Plugin for RocksPlugin {
         let db = self.db.as_ref().unwrap().clone();
         let monitor = self.monitor.as_ref().unwrap().clone();
         let app = app::quit_handle().unwrap();
-        RocksPlugin::recv(db, monitor, app);
+        Self::recv(db, monitor, app);
     }
 
     fn shutdown(&mut self) {}
 }
 
 impl RocksPlugin {
+    pub fn find_by_prefix_static(db: &RocksDB, key: &str) -> Value {
+        let result = db.get(key.as_bytes()).unwrap();
+        match result {
+            None => Value::Null,
+            Some(value) => {
+                Value::Object(serde_json::from_str(String::from_utf8(value).unwrap().as_str()).unwrap())
+            }
+        }
+    }
+
+    pub fn get_db(&self) -> Arc<DBWithThreadMode<SingleThreaded>> {
+        self.db.as_ref().unwrap().clone()
+    }
+
     fn recv(db: RocksDB, monitor: SubscribeHandle, app: QuitHandle) {
         tokio::spawn(async move {
             if let Some(mut mon_lock) = monitor.try_lock() {
@@ -101,7 +97,7 @@ impl RocksPlugin {
                 }
             }
             if !app.is_quiting() {
-                RocksPlugin::recv(db, monitor, app);
+                Self::recv(db, monitor, app);
             }
         });
     }

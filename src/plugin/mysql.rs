@@ -6,38 +6,20 @@ use mysql::prelude::Queryable;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::{message};
 use crate::libs::environment;
 use crate::libs::mysql::get_params;
 use crate::libs::serde::{get_object, get_str};
+use crate::message;
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 
 pub struct MySqlPlugin {
-    pool: Option<MySqlPool>,
+    pool: Option<Pool>,
     monitor: Option<SubscribeHandle>,
 }
-
-type MySqlPool = Pool;
 
 message!(MySqlMsg; {query: String}, {value: Value});
 
 appbase_plugin_requires!(MySqlPlugin; JsonRpcPlugin);
-
-impl MySqlPlugin {
-    pub fn create_table(&self, sql_files: Vec<&str>) {
-        let pool = self.pool.as_ref().unwrap();
-        for sql_file in sql_files.into_iter() {
-            let query = fs::read_to_string(sql_file).unwrap();
-            let result = pool.get_conn().unwrap().exec_drop(query, ());
-            match result {
-                Ok(_) => {}
-                Err(err) => {
-                    println!("error={:?}", err);
-                }
-            }
-        }
-    }
-}
 
 impl Plugin for MySqlPlugin {
     fn new() -> Self {
@@ -59,7 +41,7 @@ impl Plugin for MySqlPlugin {
         let pool = self.pool.as_ref().unwrap().clone();
         let monitor = self.monitor.as_ref().unwrap().clone();
         let app = app::quit_handle().unwrap();
-        MySqlPlugin::recv(pool, monitor, app);
+        Self::recv(pool, monitor, app);
     }
 
     fn shutdown(&mut self) {}
@@ -75,14 +57,28 @@ impl MySqlPlugin {
                     let value = get_object(parsed_msg, "value").unwrap();
                     let params = get_params(value);
                     let result = pool.get_conn().unwrap().exec_drop(query, params);
-                    if result.is_err() {
-                        println!("{}", result.unwrap_err());
+                    if let Err(err) = result {
+                        println!("mysql_error={:?}", err);
                     }
                 }
             }
             if !app.is_quiting() {
-                MySqlPlugin::recv(pool, monitor, app);
+                Self::recv(pool, monitor, app);
             }
         });
+    }
+
+    pub fn create_table(&self, sql_files: Vec<&str>) {
+        let pool = self.pool.as_ref().unwrap();
+        for sql_file in sql_files.into_iter() {
+            let query = fs::read_to_string(sql_file).unwrap();
+            let result = pool.get_conn().unwrap().exec_drop(query, ());
+            match result {
+                Ok(_) => {}
+                Err(err) => {
+                    println!("mysql_error={:?}", err);
+                }
+            }
+        }
     }
 }
