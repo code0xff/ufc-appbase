@@ -6,6 +6,7 @@ use lettre::transport::smtp::authentication::Credentials;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::error::error::ExpectedError;
 use crate::libs;
 use crate::libs::serde::get_str;
 use crate::message;
@@ -49,7 +50,9 @@ impl EmailPlugin {
                     let subject = get_str(parsed_msg, "subject").unwrap();
                     let body = get_str(parsed_msg, "body").unwrap();
 
-                    Self::send(to, subject, body);
+                    if let Err(result) = Self::send(to, subject, body) {
+                        println!("{}", result);
+                    }
                 }
             }
             if !app.is_quiting() {
@@ -58,13 +61,13 @@ impl EmailPlugin {
         });
     }
 
-    pub fn send(to: &str, subject: &str, body: &str) {
-        let smtp_username = libs::environment::string("SMTP_USERNAME").unwrap();
-        let smtp_password = libs::environment::string("SMTP_PASSWORD").unwrap();
+    pub fn send(to: &str, subject: &str, body: &str) -> Result<(), ExpectedError> {
+        let smtp_username = libs::environment::string("SMTP_USERNAME")?;
+        let smtp_password = libs::environment::string("SMTP_PASSWORD")?;
         let credentials = Credentials::new(smtp_username, smtp_password);
-        let smtp_relay = libs::environment::string("SMTP_RELAY").unwrap();
-        let from = libs::environment::string("EMAIL_FROM").unwrap();
-        let reply_to = libs::environment::string("EMAIL_REPLY_TO").unwrap();
+        let smtp_relay = libs::environment::string("SMTP_RELAY")?;
+        let from = libs::environment::string("EMAIL_FROM")?;
+        let reply_to = libs::environment::string("EMAIL_REPLY_TO")?;
 
         let email = Message::builder()
             .from(from.as_str().parse().unwrap())
@@ -79,9 +82,7 @@ impl EmailPlugin {
             .credentials(credentials)
             .build();
 
-        let result = mailer.send(&email);
-        if let Err(err) = result {
-            println!("email_error={:?}", err);
-        }
+        let _ = mailer.send(&email)?;
+        Ok(())
     }
 }

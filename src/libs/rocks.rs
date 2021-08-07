@@ -11,12 +11,8 @@ type RocksDB = Arc<DBWithThreadMode<SingleThreaded>>;
 pub fn get_static(rocksdb: &RocksDB, key: &str) -> Value {
     let result = rocksdb.get(key.as_bytes()).unwrap();
     match result {
-        None => {
-            Value::Null
-        }
-        Some(value) => {
-            Value::Object(serde_json::from_str(String::from_utf8(value).unwrap().as_str()).unwrap())
-        }
+        None => Value::Null,
+        Some(value) => Value::Object(serde_json::from_str(String::from_utf8(value).unwrap().as_str()).unwrap()),
     }
 }
 

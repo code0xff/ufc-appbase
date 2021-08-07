@@ -22,7 +22,7 @@ fn get_bson(value: &Value) -> Bson {
             } else {
                 bson!(n.to_string())
             }
-        }
+        },
         Value::String(s) => Bson::String(s.clone()),
         Value::Array(vec) => Bson::Array(vec.iter().map(|v| { get_bson(v) }).collect()),
         Value::Object(obj) => Bson::Document(get_doc(obj)),

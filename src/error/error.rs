@@ -1,13 +1,42 @@
-use std::error::Error;
 use std::fmt::{Display, Formatter};
+use lettre::transport::smtp;
+use std::str::ParseBoolError;
+use std::env::VarError;
 
 #[derive(Debug)]
-pub struct TypeError;
+pub enum ExpectedError {
+    TypeError(String),
+    NoneError(String),
+    ProcessError(String),
+}
 
-impl Display for TypeError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "type does not match!")
+impl From<smtp::Error> for ExpectedError {
+    fn from(err: smtp::Error) -> Self {
+        ExpectedError::ProcessError(err.to_string())
     }
 }
 
-impl Error for TypeError {}
+impl From<ParseBoolError> for ExpectedError {
+    fn from(err: ParseBoolError) -> Self {
+        ExpectedError::TypeError(err.to_string())
+    }
+}
+
+impl From<VarError> for ExpectedError {
+    fn from(err: VarError) -> Self {
+        match err {
+            VarError::NotPresent => ExpectedError::NoneError(err.to_string()),
+            VarError::NotUnicode(_) => ExpectedError::TypeError(err.to_string()),
+        }
+    }
+}
+
+impl Display for ExpectedError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExpectedError::TypeError(err) => write!(f, "{}", err),
+            ExpectedError::NoneError(err) => write!(f, "{}", err),
+            ExpectedError::ProcessError(err) => write!(f, "{}", err),
+        }
+    }
+}
