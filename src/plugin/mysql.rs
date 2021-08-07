@@ -66,9 +66,9 @@ impl MySqlPlugin {
         });
     }
 
-    pub fn execute_query(&self, query: String) {
+    pub fn execute_query(&self, query: String, params: Params) {
         let pool = self.pool.as_ref().unwrap();
-        let result = pool.get_conn().unwrap().exec_drop(query, ());
+        let result = pool.get_conn().unwrap().exec_drop(query, params);
         if let Err(err) = result {
             println!("mysql_error={:?}", err);
         }

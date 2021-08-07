@@ -1,9 +1,8 @@
-use std::error::Error;
 use std::fmt::Debug;
 
 use jsonrpc_core::Value;
 
-use crate::error::error::TypeError;
+use crate::error::error::ExpectedError;
 use crate::libs::serde::{get_array, get_bool, get_object, get_string};
 
 #[derive(Clone, Debug)]
@@ -23,9 +22,9 @@ struct Attribute {
 }
 
 impl Schema {
-    pub fn from(table: String, values: &Value) -> Result<Schema, Box<dyn Error>> {
+    pub fn from(table: String, values: &Value) -> Result<Schema, ExpectedError> {
         if !values.is_object() {
-            return Err(Box::new(TypeError));
+            return Err(ExpectedError::TypeError(String::from("input values is not object type!")));
         }
         let map = values.as_object().unwrap();
         let raw_attributes = get_object(map, "attributes")?;
