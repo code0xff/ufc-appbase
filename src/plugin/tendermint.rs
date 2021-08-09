@@ -47,6 +47,13 @@ plugin::requires!(TendermintPlugin; JsonRpcPlugin, RocksPlugin);
 
 impl Plugin for TendermintPlugin {
     fn new() -> Self {
+        app::arg(clap::Arg::new("tendermint::block-mysql-sync").long("tm-block-mysql-sync"));
+        app::arg(clap::Arg::new("tendermint::tx-mysql-sync").long("tm-tx-mysql-sync"));
+        app::arg(clap::Arg::new("tendermint::block-mongo-sync").long("tm-block-mongo-sync"));
+        app::arg(clap::Arg::new("tendermint::tx-mongo-sync").long("tm-tx-mongo-sync"));
+        app::arg(clap::Arg::new("tendermint::block-rabbit-mq-publish").long("tm-block-rabbit-mq-publish"));
+        app::arg(clap::Arg::new("tendermint::tx-rabbit-mq-publish").long("tm-tx-rabbit-mq-publish"));
+
         TendermintPlugin {
             sub_events: None,
             channels: None,
@@ -330,12 +337,12 @@ impl TendermintPlugin {
         self.channels = Some(channels.to_owned());
         self.monitor = Some(app::subscribe_channel(String::from("tendermint")));
         self.schema = Some(HashMap::new());
-        self.tm_block_mysql_sync = Some(libs::environment::bool("TM_BLOCK_MYSQL_SYNC").unwrap());
-        self.tm_tx_mysql_sync = Some(libs::environment::bool("TM_TX_MYSQL_SYNC").unwrap());
-        self.tm_block_mongo_sync = Some(libs::environment::bool("TM_BLOCK_MONGO_SYNC").unwrap());
-        self.tm_tx_mongo_sync = Some(libs::environment::bool("TM_TX_MONGO_SYNC").unwrap());
-        self.tm_block_publish = Some(libs::environment::bool("TM_BLOCK_RABBIT_MQ_PUBLISH").unwrap());
-        self.tm_tx_publish = Some(libs::environment::bool("TM_TX_RABBIT_MQ_PUBLISH").unwrap());
+        self.tm_block_mysql_sync = Some(libs::opts::bool("tendermint::block-mysql-sync").unwrap());
+        self.tm_tx_mysql_sync = Some(libs::opts::bool("tendermint::tx-mysql-sync").unwrap());
+        self.tm_block_mongo_sync = Some(libs::opts::bool("tendermint::block-mongo-sync").unwrap());
+        self.tm_tx_mongo_sync = Some(libs::opts::bool("tendermint::tx-mongo-sync").unwrap());
+        self.tm_block_publish = Some(libs::opts::bool("tendermint::block-rabbit-mq-publish").unwrap());
+        self.tm_tx_publish = Some(libs::opts::bool("tendermint::tx-rabiit-mq-publish").unwrap());
     }
 
     fn load_schema(&mut self) {

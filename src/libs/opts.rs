@@ -1,15 +1,14 @@
-use std::env;
 use std::str::FromStr;
+use appbase::app;
 
 use crate::error::error::ExpectedError;
 
 pub fn bool(key: &str) -> Result<bool, ExpectedError> {
-    let string = string(key)?;
-    let bool = bool::from_str(string.as_str())?;
-    Ok(bool)
+    Ok(app::is_present(key))
 }
 
 pub fn string(key: &str) -> Result<String, ExpectedError> {
-    let string = env::var(key)?;
-    Ok(string)
+    let string = app::value_of(key)
+        .ok_or(ExpectedError::NoneError("argument is null!".to_string()))?;
+    Ok(string.to_string())
 }

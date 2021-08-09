@@ -19,6 +19,8 @@ plugin::requires!(TelegramPlugin; );
 
 impl Plugin for TelegramPlugin {
     fn new() -> Self {
+        app::arg(clap::Arg::new("telegram::bot-token").long("telegram-bot-token").takes_value(true));
+
         TelegramPlugin {
             token: None,
             monitor: None,
@@ -26,7 +28,7 @@ impl Plugin for TelegramPlugin {
     }
 
     fn initialize(&mut self) {
-        let token = libs::environment::string("TELEGRAM_BOT_TOKEN").unwrap();
+        let token = libs::opts::string("telegram::bot-token").unwrap();
         self.token = Some(token.clone());
         self.monitor = Some(app::subscribe_channel(String::from("telegram")));
     }

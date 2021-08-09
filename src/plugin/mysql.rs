@@ -6,7 +6,7 @@ use mysql::prelude::Queryable;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use crate::libs::environment;
+use crate::libs::opts;
 use crate::libs::mysql::get_params;
 use crate::libs::serde::{get_object, get_str};
 use crate::message;
@@ -23,6 +23,8 @@ plugin::requires!(MySqlPlugin; JsonRpcPlugin);
 
 impl Plugin for MySqlPlugin {
     fn new() -> Self {
+        app::arg(clap::Arg::new("mysql::url").long("mysql-url").takes_value(true));
+
         MySqlPlugin {
             monitor: None,
             pool: None,
@@ -30,7 +32,7 @@ impl Plugin for MySqlPlugin {
     }
 
     fn initialize(&mut self) {
-        let mysql_url = environment::string("MYSQL_URL").unwrap();
+        let mysql_url = opts::string("mysql::url").unwrap();
         let opts = Opts::from_url(mysql_url.as_str()).unwrap();
         let pool = Pool::new(opts).unwrap();
         self.pool = Some(pool);
