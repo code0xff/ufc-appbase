@@ -71,8 +71,8 @@ impl Plugin for TendermintPlugin {
     fn initialize(&mut self) {
         self.init();
         self.register_jsonrpc();
-        self.load_schema();
         self.load_tasks();
+        // self.load_schema();
     }
 
     fn startup(&mut self) {
