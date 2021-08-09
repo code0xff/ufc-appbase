@@ -45,7 +45,7 @@ impl Plugin for TelegramPlugin {
 
 impl TelegramPlugin {
     fn recv(mut monitor: channel::Receiver, token: String, app: QuitHandle) {
-        tokio::spawn(async move {
+        app::spawn(async move {
             if let Ok(msg) = monitor.try_recv() {
                 let parsed_msg = msg.as_object().unwrap();
                 let chat_id = get_str(parsed_msg, "chat_id").unwrap();

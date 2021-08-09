@@ -37,7 +37,7 @@ impl Plugin for SlackPlugin {
 
 impl SlackPlugin {
     fn recv(mut monitor: channel::Receiver, app: QuitHandle) {
-        tokio::spawn(async move {
+        app::spawn(async move {
             if let Ok(msg) = monitor.try_recv() {
                 let parsed_msg = msg.as_object().unwrap();
 

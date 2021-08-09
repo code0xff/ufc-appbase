@@ -78,7 +78,7 @@ impl RocksPlugin {
     }
 
     fn recv(db: RocksDB, mut monitor: channel::Receiver, app: QuitHandle) {
-        tokio::spawn(async move {
+        app::spawn(async move {
             if let Ok(msg) = monitor.try_recv() {
                 let parsed_msg = msg.as_object().unwrap();
                 let method = RocksMethod::find(parsed_msg.get("method").unwrap().as_str().unwrap()).unwrap();

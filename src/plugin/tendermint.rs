@@ -71,7 +71,7 @@ impl Plugin for TendermintPlugin {
     fn initialize(&mut self) {
         self.init();
         self.register_jsonrpc();
-        // self.load_schema();
+        self.load_schema();
         self.load_tasks();
     }
 
@@ -93,7 +93,7 @@ impl Plugin for TendermintPlugin {
         let app = app::quit_handle().unwrap();
 
         let schema = self.schema.as_ref().unwrap().clone();
-        tokio::task::spawn_blocking(move || {
+        app::spawn_blocking(move || {
             loop {
                 if app.is_quiting() {
                     break;

@@ -1,0 +1,27 @@
+[tendermint]
+block-mysql-sync=false
+block-mongo-sync=false
+block-rabbit-mq-publish=false
+tx-mysql-sync=false
+tx-mongo-sync=false
+tx-rabbit-mq-publish=false
+
+[rabbit-mq]
+url="amqp://rabbitmq:rabbitmq@localhost:5672"
+queue="ufc"
+
+[mysql]
+url="mysql://root:mariadb@localhost:3306/ufc"
+
+[mongo]
+url="mongodb://root:mongodb@localhost:27017"
+
+[email]
+smtp-username="smtp_username"
+smtp-password="smtp_password"
+smtp-relay="smtp.gmail.com"
+from="NoBody <nobody@domain.dev>"
+reply-to="NoBody <nobody@domain.dev>"
+
+[telegram]
+bot-token="TELEGRAM_BOT_TOKEN"

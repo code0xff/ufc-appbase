@@ -49,7 +49,7 @@ impl Plugin for MongoPlugin {
 
 impl MongoPlugin {
     fn recv(db: Database, mut monitor: channel::Receiver, app: QuitHandle) {
-        tokio::spawn(async move {
+        app::spawn(async move {
             if let Ok(msg) = monitor.try_recv() {
                 let parsed_msg = msg.as_object().unwrap();
                 let collection_name = get_str(parsed_msg, "collection").unwrap();

@@ -44,7 +44,7 @@ impl Plugin for RabbitPlugin {
 
 impl RabbitPlugin {
     fn recv(conn: RabbitConnection, mut monitor: channel::Receiver, app: QuitHandle) {
-        tokio::spawn(async move {
+        app::spawn(async move {
             if let Some(mut conn_lock) = conn.try_lock() {
                 let channel = conn_lock.open_channel(None).unwrap();
                 let exchange = Exchange::direct(&channel);
