@@ -26,7 +26,7 @@ use crate::validation::{get_task, subscribe, unsubscribe};
 pub struct TendermintPlugin {
     sub_events: Option<SubscribeEvents>,
     channels: Option<MultiChannel>,
-    monitor: Option<SubscribeHandle>,
+    monitor: Option<channel::Receiver>,
     schema: Option<HashMap<String, Schema>>,
     tm_block_mysql_sync: Option<bool>,
     tm_tx_mysql_sync: Option<bool>,
@@ -43,7 +43,7 @@ type SubscribeEvents = Arc<FutureMutex<HashMap<String, SubscribeEvent>>>;
 
 message!((TendermintMsg; {value: Value}); (TendermintMethod; {Subscribe: "subscribe"}, {Unsubscribe: "unsubscribe"}));
 
-appbase_plugin_requires!(TendermintPlugin; JsonRpcPlugin, RocksPlugin);
+plugin::requires!(TendermintPlugin; JsonRpcPlugin, RocksPlugin);
 
 impl Plugin for TendermintPlugin {
     fn new() -> Self {
@@ -69,7 +69,7 @@ impl Plugin for TendermintPlugin {
     }
 
     fn startup(&mut self) {
-        let monitor = Arc::clone(self.monitor.as_ref().unwrap());
+        let mut monitor = self.monitor.take().unwrap();
         let sub_events = Arc::clone(self.sub_events.as_ref().unwrap());
 
         let rocks_channel = self.channels.as_ref().unwrap().get("rocks");
@@ -87,7 +87,6 @@ impl Plugin for TendermintPlugin {
 
         let schema = self.schema.as_ref().unwrap().clone();
         tokio::task::spawn_blocking(move || {
-            let mut mon_lock = monitor.try_lock().unwrap();
             loop {
                 if app.is_quiting() {
                     break;
@@ -98,7 +97,7 @@ impl Plugin for TendermintPlugin {
                     continue;
                 }
                 let mut sub_events_lock = sub_events_try_lock.unwrap();
-                if let Ok(msg) = mon_lock.try_recv() {
+                if let Ok(msg) = monitor.try_recv() {
                     let parsed_msg = msg.as_object().unwrap();
                     let method = TendermintMethod::find(get_str(parsed_msg, "method").unwrap()).unwrap();
                     let params = get_object(parsed_msg, "value").unwrap();
@@ -109,14 +108,14 @@ impl Plugin for TendermintPlugin {
 
                             let task = SubscribeTask::from(&new_event, String::from(""));
                             let msg = RocksMsg::new(RocksMethod::Put, new_event.task_id, Value::String(json!(task).to_string()));
-                            let _ = rocks_channel.lock().unwrap().send(msg);
+                            let _ = rocks_channel.send(msg);
                         }
                         TendermintMethod::Unsubscribe => {
                             let task_id = get_string(&params, "task_id").unwrap();
                             sub_events_lock.remove(&task_id);
 
                             let msg = RocksMsg::new(RocksMethod::Delete, task_id, Value::Null);
-                            let _ = rocks_channel.lock().unwrap().send(msg);
+                            let _ = rocks_channel.send(msg);
                         }
                     };
                 }
@@ -184,17 +183,17 @@ impl Plugin for TendermintPlugin {
                                     let values = pick(header_object, vec!["chain_id", "height", "time", "last_commit_hash", "data_hash", "validators_hash", "next_validators_hash", "consensus_hash", "app_hash", "last_results_hash", "evidence_hash", "proposer_address"]);
                                     if values.is_ok() {
                                         let mysql_msg = MySqlMsg::new(String::from(insert_query), Value::Object(values.unwrap()));
-                                        let _ = mysql_channel.lock().unwrap().send(mysql_msg);
+                                        let _ = mysql_channel.send(mysql_msg);
                                     } else {
                                         println!("{}", values.unwrap_err());
                                     }
                                 }
                                 if tm_block_mongo_sync {
                                     let mongo_msg = MongoMsg::new(String::from("tm_block"), header.clone());
-                                    let _ = mongo_channel.lock().unwrap().send(mongo_msg);
+                                    let _ = mongo_channel.send(mongo_msg);
                                 }
                                 if tm_block_publish {
-                                    let _ = rabbit_channel.lock().unwrap().send(Value::String(header.to_string()));
+                                    let _ = rabbit_channel.send(Value::String(header.to_string()));
                                 }
 
                                 Self::sync_event(&rocks_channel, sub_event);
@@ -296,17 +295,17 @@ impl Plugin for TendermintPlugin {
                                         let values = pick(tx_object, vec!["txhash", "height", "gas_wanted", "gas_used", "raw_log", "timestamp"]);
                                         if values.is_ok() {
                                             let mysql_msg = MySqlMsg::new(String::from(insert_query), Value::Object(values.unwrap()));
-                                            let _ = mysql_channel.lock().unwrap().send(mysql_msg);
+                                            let _ = mysql_channel.send(mysql_msg);
                                         } else {
                                             println!("{}", values.unwrap_err());
                                         }
                                     }
                                     if tm_tx_mongo_sync {
                                         let mongo_msg = MongoMsg::new(String::from("tm_tx"), tx.clone());
-                                        let _ = mongo_channel.lock().unwrap().send(mongo_msg);
+                                        let _ = mongo_channel.send(mongo_msg);
                                     }
                                     if tm_tx_publish {
-                                        let _ = rabbit_channel.lock().unwrap().send(Value::String(tx.to_string()));
+                                        let _ = rabbit_channel.send(Value::String(tx.to_string()));
                                     }
                                 }
 
@@ -380,7 +379,7 @@ impl TendermintPlugin {
                 return Box::new(futures::future::ready(Ok(Value::String(verified.unwrap_err()))));
             }
             let message = TendermintMsg::new(TendermintMethod::Subscribe, Value::Object(params.clone()));
-            let _ = tm_channel.lock().unwrap().send(message);
+            let _ = tm_channel.send(message);
             let task_id = SubscribeTask::task_id(CHAIN, &params);
 
             let value = get_static(&rocks_db, task_id.as_str());
@@ -402,7 +401,7 @@ impl TendermintPlugin {
             }
 
             let tm_msg = TendermintMsg::new(TendermintMethod::Unsubscribe, Value::Object(params.clone()));
-            let _ = tm_channel.lock().unwrap().send(tm_msg);
+            let _ = tm_channel.send(tm_msg);
 
             let task_id = get_str(&params, "task_id").unwrap();
             let value = get_static(&rocks_db, task_id);
@@ -449,19 +448,19 @@ impl TendermintPlugin {
             });
     }
 
-    fn sync_event(rocks_channel: &ChannelHandle, sub_event: &mut SubscribeEvent) {
+    fn sync_event(rocks_channel: &channel::Sender, sub_event: &mut SubscribeEvent) {
         let task = SubscribeTask::from(&sub_event, String::from(""));
         let task_id = task.task_id.clone();
 
         let msg = RocksMsg::new(RocksMethod::Put, task_id, Value::String(json!(task).to_string()));
-        let _ = rocks_channel.lock().unwrap().send(msg);
+        let _ = rocks_channel.send(msg);
     }
 
-    fn error_handler(rocks_channel: &ChannelHandle, sub_event: &mut SubscribeEvent, err_msg: String) {
+    fn error_handler(rocks_channel: &channel::Sender, sub_event: &mut SubscribeEvent, err_msg: String) {
         sub_event.handle_err(err_msg.clone());
         let task = SubscribeTask::from(sub_event, err_msg);
 
         let msg = RocksMsg::new(RocksMethod::Put, sub_event.task_id.clone(), Value::String(json!(task).to_string()));
-        let _ = rocks_channel.lock().unwrap().send(msg);
+        let _ = rocks_channel.send(msg);
     }
 }

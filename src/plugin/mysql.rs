@@ -14,12 +14,12 @@ use crate::plugin::jsonrpc::JsonRpcPlugin;
 
 pub struct MySqlPlugin {
     pool: Option<Pool>,
-    monitor: Option<SubscribeHandle>,
+    monitor: Option<channel::Receiver>,
 }
 
 message!(MySqlMsg; {query: String}, {value: Value});
 
-appbase_plugin_requires!(MySqlPlugin; JsonRpcPlugin);
+plugin::requires!(MySqlPlugin; JsonRpcPlugin);
 
 impl Plugin for MySqlPlugin {
     fn new() -> Self {
@@ -39,7 +39,7 @@ impl Plugin for MySqlPlugin {
 
     fn startup(&mut self) {
         let pool = self.pool.as_ref().unwrap().clone();
-        let monitor = self.monitor.as_ref().unwrap().clone();
+        let monitor = self.monitor.take().unwrap();
         let app = app::quit_handle().unwrap();
         Self::recv(pool, monitor, app);
     }
@@ -48,18 +48,16 @@ impl Plugin for MySqlPlugin {
 }
 
 impl MySqlPlugin {
-    fn recv(pool: Pool, monitor: SubscribeHandle, app: QuitHandle) {
+    fn recv(pool: Pool, mut monitor: channel::Receiver, app: QuitHandle) {
         tokio::spawn(async move {
-            if let Some(mut mon_lock) = monitor.try_lock() {
-                if let Ok(msg) = mon_lock.try_recv() {
-                    let parsed_msg = msg.as_object().unwrap();
-                    let query = get_str(parsed_msg, "query").unwrap();
-                    let value = get_object(parsed_msg, "value").unwrap();
-                    let params = get_params(value);
-                    let result = pool.get_conn().unwrap().exec_drop(query, params);
-                    if let Err(err) = result {
-                        println!("mysql_error={:?}", err);
-                    }
+            if let Ok(msg) = monitor.try_recv() {
+                let parsed_msg = msg.as_object().unwrap();
+                let query = get_str(parsed_msg, "query").unwrap();
+                let value = get_object(parsed_msg, "value").unwrap();
+                let params = get_params(value);
+                let result = pool.get_conn().unwrap().exec_drop(query, params);
+                if let Err(err) = result {
+                    println!("mysql_error={:?}", err);
                 }
             }
             if !app.is_quiting() {

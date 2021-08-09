@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use appbase::*;
 use lettre::{Message, SmtpTransport, Transport};
 use lettre::transport::smtp::authentication::Credentials;
@@ -12,12 +10,12 @@ use crate::libs::serde::get_str;
 use crate::message;
 
 pub struct EmailPlugin {
-    monitor: Option<SubscribeHandle>,
+    monitor: Option<channel::Receiver>,
 }
 
 message!(EmailMsg; {to: String}, {subject: String}, {body: String});
 
-appbase_plugin_requires!(EmailPlugin; );
+plugin::requires!(EmailPlugin; );
 
 impl Plugin for EmailPlugin {
     fn new() -> Self {
@@ -31,7 +29,7 @@ impl Plugin for EmailPlugin {
     }
 
     fn startup(&mut self) {
-        let monitor = Arc::clone(self.monitor.as_ref().unwrap());
+        let monitor = self.monitor.take().unwrap();
         let app = app::quit_handle().unwrap();
         Self::recv(monitor, app);
     }
@@ -40,19 +38,17 @@ impl Plugin for EmailPlugin {
 }
 
 impl EmailPlugin {
-    fn recv(monitor: SubscribeHandle, app: QuitHandle) {
+    fn recv(mut monitor: channel::Receiver, app: QuitHandle) {
         tokio::spawn(async move {
-            if let Some(mut mon_lock) = monitor.try_lock() {
-                if let Ok(msg) = mon_lock.try_recv() {
-                    let parsed_msg = msg.as_object().unwrap();
+            if let Ok(msg) = monitor.try_recv() {
+                let parsed_msg = msg.as_object().unwrap();
 
-                    let to = get_str(parsed_msg, "to").unwrap();
-                    let subject = get_str(parsed_msg, "subject").unwrap();
-                    let body = get_str(parsed_msg, "body").unwrap();
+                let to = get_str(parsed_msg, "to").unwrap();
+                let subject = get_str(parsed_msg, "subject").unwrap();
+                let body = get_str(parsed_msg, "body").unwrap();
 
-                    if let Err(result) = Self::send(to, subject, body) {
-                        println!("{}", result);
-                    }
+                if let Err(result) = Self::send(to, subject, body) {
+                    println!("{}", result);
                 }
             }
             if !app.is_quiting() {

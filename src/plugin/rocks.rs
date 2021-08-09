@@ -14,14 +14,14 @@ use crate::validation::find_by_key;
 
 pub struct RocksPlugin {
     db: Option<RocksDB>,
-    monitor: Option<SubscribeHandle>,
+    monitor: Option<channel::Receiver>,
 }
 
 type RocksDB = Arc<DBWithThreadMode<SingleThreaded>>;
 
 message!((RocksMsg; {key: String}, {value: Value}); (RocksMethod; {Put: "put"}, {Delete: "delete"}));
 
-appbase_plugin_requires!(RocksPlugin; );
+plugin::requires!(RocksPlugin; );
 
 impl Plugin for RocksPlugin {
     fn new() -> Self {
@@ -54,7 +54,7 @@ impl Plugin for RocksPlugin {
 
     fn startup(&mut self) {
         let db = self.db.as_ref().unwrap().clone();
-        let monitor = self.monitor.as_ref().unwrap().clone();
+        let monitor = self.monitor.take().unwrap();
         let app = app::quit_handle().unwrap();
         Self::recv(db, monitor, app);
     }
@@ -77,22 +77,20 @@ impl RocksPlugin {
         self.db.as_ref().unwrap().clone()
     }
 
-    fn recv(db: RocksDB, monitor: SubscribeHandle, app: QuitHandle) {
+    fn recv(db: RocksDB, mut monitor: channel::Receiver, app: QuitHandle) {
         tokio::spawn(async move {
-            if let Some(mut mon_lock) = monitor.try_lock() {
-                if let Ok(msg) = mon_lock.try_recv() {
-                    let parsed_msg = msg.as_object().unwrap();
-                    let method = RocksMethod::find(parsed_msg.get("method").unwrap().as_str().unwrap()).unwrap();
-                    match method {
-                        RocksMethod::Put => {
-                            let key = get_str(parsed_msg, "key").unwrap();
-                            let val = get_str(parsed_msg, "value").unwrap();
-                            let _ = db.put(key.as_bytes(), val.as_bytes());
-                        }
-                        RocksMethod::Delete => {
-                            let key = get_str(parsed_msg, "key").unwrap();
-                            let _ = db.delete(key.as_bytes());
-                        }
+            if let Ok(msg) = monitor.try_recv() {
+                let parsed_msg = msg.as_object().unwrap();
+                let method = RocksMethod::find(parsed_msg.get("method").unwrap().as_str().unwrap()).unwrap();
+                match method {
+                    RocksMethod::Put => {
+                        let key = get_str(parsed_msg, "key").unwrap();
+                        let val = get_str(parsed_msg, "value").unwrap();
+                        let _ = db.put(key.as_bytes(), val.as_bytes());
+                    }
+                    RocksMethod::Delete => {
+                        let key = get_str(parsed_msg, "key").unwrap();
+                        let _ = db.delete(key.as_bytes());
                     }
                 }
             }

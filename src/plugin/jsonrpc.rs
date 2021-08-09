@@ -10,7 +10,7 @@ pub struct JsonRpcPlugin {
     server: Option<CloseHandle>,
 }
 
-appbase_plugin_requires!(JsonRpcPlugin; );
+plugin::requires!(JsonRpcPlugin; );
 
 /*
  * `add_sync_method` and `add_method` SHOULD be called during plugin initialization.
