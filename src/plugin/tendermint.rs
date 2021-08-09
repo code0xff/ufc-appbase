@@ -355,7 +355,10 @@ impl TendermintPlugin {
         let mysql = plugin.downcast_mut::<MySqlPlugin>().unwrap();
 
         for (_, selected_schema) in schema.iter() {
-            mysql.execute_query(selected_schema.create_table.clone(), mysql::Params::Empty);
+            let result = mysql.execute(selected_schema.create_table.clone(), mysql::Params::Empty);
+            if let Err(err) = result {
+                println!("error={}", err.to_string());
+            }
         }
     }
 

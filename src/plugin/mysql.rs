@@ -1,8 +1,10 @@
+use std::collections::HashMap;
+
 use appbase::*;
 use mysql::*;
 use mysql::prelude::Queryable;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 use crate::libs::environment;
 use crate::libs::mysql::get_params;
@@ -66,11 +68,25 @@ impl MySqlPlugin {
         });
     }
 
-    pub fn execute_query(&self, query: String, params: Params) {
+    pub fn execute(&self, query: String, params: Params) -> Result<()> {
         let pool = self.pool.as_ref().unwrap();
-        let result = pool.get_conn().unwrap().exec_drop(query, params);
-        if let Err(err) = result {
-            println!("mysql_error={:?}", err);
+        let _ = pool.get_conn().unwrap().exec_drop(query, params)?;
+        Ok(())
+    }
+
+    pub fn query(&self, query: String, params: Params) -> Result<Vec<Value>> {
+        let pool = self.pool.as_ref().unwrap();
+        let rows: Vec<Row> = pool.get_conn().unwrap().exec(query, params)?;
+
+        let mut result: Vec<Value> = Vec::new();
+        for row in rows.iter() {
+            let mut converted = HashMap::new();
+            for column in row.columns_ref() {
+                let column_value = &row[column.name_str().as_ref()];
+                converted.insert(String::from(column.name_str()), column_value.as_sql(true));
+            }
+            result.push(json!(converted));
         }
+        Ok(result)
     }
 }
