@@ -8,12 +8,12 @@ use crate::libs::environment;
 
 pub struct RabbitPlugin {
     conn: Option<RabbitConnection>,
-    monitor: Option<SubscribeHandle>,
+    monitor: Option<channel::Receiver>,
 }
 
 type RabbitConnection = Arc<FutureMutex<Connection>>;
 
-appbase_plugin_requires!(RabbitPlugin; );
+plugin::requires!(RabbitPlugin; );
 
 impl Plugin for RabbitPlugin {
     fn new() -> Self {
@@ -31,7 +31,7 @@ impl Plugin for RabbitPlugin {
 
     fn startup(&mut self) {
         let conn = self.conn.as_ref().unwrap().clone();
-        let monitor = self.monitor.as_ref().unwrap().clone();
+        let monitor = self.monitor.take().unwrap();
         let app = app::quit_handle().unwrap();
         Self::recv(conn, monitor, app);
     }
@@ -40,18 +40,16 @@ impl Plugin for RabbitPlugin {
 }
 
 impl RabbitPlugin {
-    fn recv(conn: RabbitConnection, monitor: SubscribeHandle, app: QuitHandle) {
+    fn recv(conn: RabbitConnection, mut monitor: channel::Receiver, app: QuitHandle) {
         tokio::spawn(async move {
-            if let Some(mut mon_lock) = monitor.try_lock() {
-                if let Some(mut conn_lock) = conn.try_lock() {
-                    let channel = conn_lock.open_channel(None).unwrap();
-                    let exchange = Exchange::direct(&channel);
-                    if let Ok(msg) = mon_lock.try_recv() {
-                        let queue = environment::string("RABBIT_MQ_QUEUE").unwrap();
-                        let result = exchange.publish(Publish::new(msg.as_str().unwrap().as_bytes(), queue.as_str()));
-                        if let Err(err) = result {
-                            println!("rabbit_error={:?}", err);
-                        }
+            if let Some(mut conn_lock) = conn.try_lock() {
+                let channel = conn_lock.open_channel(None).unwrap();
+                let exchange = Exchange::direct(&channel);
+                if let Ok(msg) = monitor.try_recv() {
+                    let queue = environment::string("RABBIT_MQ_QUEUE").unwrap();
+                    let result = exchange.publish(Publish::new(msg.as_str().unwrap().as_bytes(), queue.as_str()));
+                    if let Err(err) = result {
+                        println!("rabbit_error={:?}", err);
                     }
                 }
             }
