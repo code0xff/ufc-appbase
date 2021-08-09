@@ -19,6 +19,12 @@ plugin::requires!(EmailPlugin; );
 
 impl Plugin for EmailPlugin {
     fn new() -> Self {
+        app::arg(clap::Arg::new("email::smtp-username").long("smtp-username").takes_value(true));
+        app::arg(clap::Arg::new("email::smtp-password").long("smtp-password").takes_value(true));
+        app::arg(clap::Arg::new("email::smtp-relay").long("smtp-relay").takes_value(true));
+        app::arg(clap::Arg::new("email::from").long("email-from").takes_value(true));
+        app::arg(clap::Arg::new("email::reply-to").long("email-reply-to").takes_value(true));
+
         EmailPlugin {
             monitor: None,
         }
@@ -58,12 +64,12 @@ impl EmailPlugin {
     }
 
     pub fn send(to: &str, subject: &str, body: &str) -> Result<(), ExpectedError> {
-        let smtp_username = libs::environment::string("SMTP_USERNAME")?;
-        let smtp_password = libs::environment::string("SMTP_PASSWORD")?;
+        let smtp_username = libs::opts::string("email::smtp-username")?;
+        let smtp_password = libs::opts::string("email::smtp-password")?;
         let credentials = Credentials::new(smtp_username, smtp_password);
-        let smtp_relay = libs::environment::string("SMTP_RELAY")?;
-        let from = libs::environment::string("EMAIL_FROM")?;
-        let reply_to = libs::environment::string("EMAIL_REPLY_TO")?;
+        let smtp_relay = libs::opts::string("email::smtp-relay")?;
+        let from = libs::opts::string("email::from")?;
+        let reply_to = libs::opts::string("email::reply-to")?;
 
         let email = Message::builder()
             .from(from.as_str().parse().unwrap())

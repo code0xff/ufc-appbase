@@ -23,6 +23,7 @@ rand = "0.8.4"
 mysql = "*"
 dotenv = "0.15.0"
 lettre = "0.10.0-rc.3"
+clap = "3.0.0-beta.2"
 
 [dependencies.mongodb]
 version = "2.0.0-beta.2"

@@ -4,7 +4,7 @@ use amiquip::{Connection, Exchange, Publish};
 use appbase::*;
 use futures::lock::Mutex as FutureMutex;
 
-use crate::libs::environment;
+use crate::libs::opts;
 
 pub struct RabbitPlugin {
     conn: Option<RabbitConnection>,
@@ -17,6 +17,9 @@ plugin::requires!(RabbitPlugin; );
 
 impl Plugin for RabbitPlugin {
     fn new() -> Self {
+        app::arg(clap::Arg::new("rabbit-mq::url").long("rabbit-mq-url").takes_value(true));
+        app::arg(clap::Arg::new("rabbit-mq::queue").long("rabbit-mq-queue").takes_value(true));
+
         RabbitPlugin {
             conn: None,
             monitor: None,
@@ -24,7 +27,7 @@ impl Plugin for RabbitPlugin {
     }
 
     fn initialize(&mut self) {
-        let rabbit_mq_url = environment::string("RABBIT_MQ_URL").unwrap();
+        let rabbit_mq_url = opts::string("rabbit-mq::url").unwrap();
         self.conn = Some(Arc::new(FutureMutex::new(Connection::insecure_open(rabbit_mq_url.as_str()).unwrap())));
         self.monitor = Some(app::subscribe_channel(String::from("rabbit")));
     }
@@ -46,7 +49,7 @@ impl RabbitPlugin {
                 let channel = conn_lock.open_channel(None).unwrap();
                 let exchange = Exchange::direct(&channel);
                 if let Ok(msg) = monitor.try_recv() {
-                    let queue = environment::string("RABBIT_MQ_QUEUE").unwrap();
+                    let queue = opts::string("rabbit-mq::queue").unwrap();
                     let result = exchange.publish(Publish::new(msg.as_str().unwrap().as_bytes(), queue.as_str()));
                     if let Err(err) = result {
                         println!("rabbit_error={:?}", err);
