@@ -249,77 +249,70 @@ impl Plugin for TendermintPlugin {
                                     continue;
                                 }
                                 let node_index = usize::from(sub_event.node_idx);
-                                let mut curr_page = 1;
 
-                                loop {
-                                    let req_url = format!("{}/txs?page={}&limit=100&tx.height={}", sub_event.nodes[node_index], curr_page, sub_event.curr_height);
-                                    let res_result = reqwest::blocking::get(req_url);
+                                let req_url = format!("{}/cosmos/tx/v1beta1/txs?events=tx.height={}", sub_event.nodes[node_index], sub_event.curr_height);
+                                let res_result = reqwest::blocking::get(req_url);
 
-                                    let res = match res_result {
-                                        Ok(res) => res,
-                                        Err(err) => {
-                                            Self::error_handler(&rocks_channel, sub_event, err.to_string());
-                                            continue;
-                                        }
-                                    };
-                                    let status = res.status().clone();
-                                    let res_body = res.text();
-
-                                    let body: Map<String, Value> = match res_body {
-                                        Ok(body) => serde_json::from_str(body.as_str()).unwrap(),
-                                        Err(err) => {
-                                            Self::error_handler(&rocks_channel, sub_event, err.to_string());
-                                            break;
-                                        }
-                                    };
-
-                                    if !status.is_success() {
-                                        let err_msg = get_string(&body, "error").unwrap();
-                                        Self::error_handler(&rocks_channel, sub_event, err_msg);
-                                        break;
+                                let res = match res_result {
+                                    Ok(res) => res,
+                                    Err(err) => {
+                                        Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                        continue;
                                     }
+                                };
+                                let status = res.status().clone();
+                                let res_body = res.text();
 
-                                    let temp_page_total = get_str(&body, "page_total");
-                                    if temp_page_total.is_err() {
-                                        Self::error_handler(&rocks_channel, sub_event, temp_page_total.unwrap_err().to_string());
-                                        break;
+                                let body: Map<String, Value> = match res_body {
+                                    Ok(body) => serde_json::from_str(body.as_str()).unwrap(),
+                                    Err(err) => {
+                                        Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                        continue;
                                     }
-                                    let page_total = i32::from_str(temp_page_total.unwrap()).unwrap();
+                                };
 
-                                    let txs = get_array(&body, "txs").unwrap();
-                                    for tx in txs.iter() {
-                                        println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
+                                if !status.is_success() {
+                                    let err_msg = get_string(&body, "error").unwrap();
+                                    Self::error_handler(&rocks_channel, sub_event, err_msg);
+                                    continue;
+                                }
 
-                                        if tm_tx_mysql_sync {
-                                            let tx_object = tx.as_object().unwrap();
-                                            let selected_schema = schema.get("tm_tx").unwrap().clone();
-                                            let insert_query = selected_schema.insert_query;
+                                let txs_result = get_array(&body, "tx_responses");
+                                let txs = match txs_result {
+                                    Ok(txs) => txs,
+                                    Err(err) => {
+                                        Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                        continue;
+                                    }
+                                };
+                                for tx in txs.iter() {
+                                    println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
 
-                                            let values = pick(tx_object, vec!["txhash", "height", "gas_wanted", "gas_used", "raw_log", "timestamp"]);
-                                            if values.is_ok() {
-                                                let mysql_msg = MySqlMsg::new(String::from(insert_query), Value::Object(values.unwrap()));
-                                                let _ = mysql_channel.lock().unwrap().send(mysql_msg);
-                                            } else {
-                                                println!("{}", values.unwrap_err());
-                                            }
-                                        }
-                                        if tm_tx_mongo_sync {
-                                            let mongo_msg = MongoMsg::new(String::from("tm_tx"), tx.clone());
-                                            let _ = mongo_channel.lock().unwrap().send(mongo_msg);
-                                        }
-                                        if tm_tx_publish {
-                                            let _ = rabbit_channel.lock().unwrap().send(Value::String(tx.to_string()));
+                                    if tm_tx_mysql_sync {
+                                        let tx_object = tx.as_object().unwrap();
+                                        let selected_schema = schema.get("tm_tx").unwrap().clone();
+                                        let insert_query = selected_schema.insert_query;
+
+                                        let values = pick(tx_object, vec!["txhash", "height", "gas_wanted", "gas_used", "raw_log", "timestamp"]);
+                                        if values.is_ok() {
+                                            let mysql_msg = MySqlMsg::new(String::from(insert_query), Value::Object(values.unwrap()));
+                                            let _ = mysql_channel.lock().unwrap().send(mysql_msg);
+                                        } else {
+                                            println!("{}", values.unwrap_err());
                                         }
                                     }
-
-                                    if curr_page < page_total {
-                                        curr_page += 1;
-                                    } else {
-                                        Self::sync_event(&rocks_channel, sub_event);
-                                        sub_event.curr_height += 1;
-                                        break;
+                                    if tm_tx_mongo_sync {
+                                        let mongo_msg = MongoMsg::new(String::from("tm_tx"), tx.clone());
+                                        let _ = mongo_channel.lock().unwrap().send(mongo_msg);
+                                    }
+                                    if tm_tx_publish {
+                                        let _ = rabbit_channel.lock().unwrap().send(Value::String(tx.to_string()));
                                     }
                                 }
+
+                                Self::sync_event(&rocks_channel, sub_event);
+                                sub_event.curr_height += 1;
+                                break;
                             }
                         }
                     }
