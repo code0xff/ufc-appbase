@@ -22,6 +22,7 @@ use crate::types::enumeration::Enumeration;
 use crate::types::mysql::Schema;
 use crate::types::subscribe::{SubscribeEvent, SubscribeTarget, SubscribeTask};
 use crate::validation::{get_blocks, get_task, subscribe, unsubscribe};
+use appbase::plugin::State;
 
 pub struct TendermintPlugin {
     sub_events: Option<SubscribeEvents>,
@@ -344,8 +345,10 @@ impl TendermintPlugin {
     }
 
     fn init_mysql(&mut self) {
-        if let None = app::find_plugin("MySqlPlugin") {
-            return;
+        if let Some(state) = app::plugin_state::<MySqlPlugin>() {
+            if state != State::Initialized {
+                return;
+            }
         }
         let json_str = fs::read_to_string("schema/mysql.json").unwrap();
         let json_schema: Value = serde_json::from_str(json_str.as_str()).unwrap();

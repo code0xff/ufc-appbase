@@ -25,3 +25,6 @@ reply-to="NoBody <nobody@domain.dev>"
 
 [telegram]
 bot-token="TELEGRAM_BOT_TOKEN"
+
+[app]
+plugin=[]
