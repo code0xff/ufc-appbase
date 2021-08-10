@@ -2,8 +2,10 @@ use std::fmt::Debug;
 
 use jsonrpc_core::Value;
 
+use crate::enumeration;
 use crate::error::error::ExpectedError;
 use crate::libs::serde::{get_array, get_bool, get_object, get_string};
+use crate::types::enumeration::Enumeration;
 
 #[derive(Clone, Debug)]
 pub struct Schema {
@@ -107,3 +109,5 @@ impl Schema {
         }
     }
 }
+
+enumeration!(Order; {Asc: "asc"}, {Desc: "desc"});

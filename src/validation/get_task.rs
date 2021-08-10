@@ -1,15 +1,18 @@
 use serde_json::{Map, Value};
 
-pub fn verify(params: &Map<String, Value>) -> Result<(), String> {
+use crate::error::error::ExpectedError;
+
+pub fn verify(params: &Map<String, Value>) -> Result<(), ExpectedError> {
     if params.get("task_id").is_some() && !params.get("task_id").unwrap().is_string() {
-        return Err(String::from("invalid task_id value"));
+        return Err(ExpectedError::TypeError(String::from("invalid task_id value!")));
     }
     Ok(())
 }
 
 #[cfg(test)]
 mod get_task_test {
-    use serde_json::{Map, json};
+    use serde_json::{json, Map};
+
     use crate::validation::get_task::verify;
 
     #[test]

@@ -44,11 +44,11 @@ impl Plugin for RocksPlugin {
             let params: Map<String, Value> = params.parse().unwrap();
             let verified = find_by_key::verify(&params);
             if verified.is_err() {
-                return Box::new(futures::future::ready(Ok(Value::String(verified.unwrap_err()))));
+                return Box::new(futures::future::ok(Value::String(verified.unwrap_err().to_string())));
             }
             let key = get_str(&params, "key").unwrap();
             let value = Self::find_by_prefix_static(&db, key);
-            Box::new(futures::future::ready(Ok(value)))
+            Box::new(futures::future::ok(value))
         });
     }
 

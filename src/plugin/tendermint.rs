@@ -1,8 +1,7 @@
-use std::{fs, thread};
+use std::{fs};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
 
 use appbase::*;
 use futures::lock::Mutex as FutureMutex;
@@ -11,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use crate::{enumeration, libs, message};
+use crate::libs::mysql::get_params;
 use crate::libs::rocks::{get_by_prefix_static, get_static};
 use crate::libs::serde::{get_array, get_object, get_str, get_string, pick};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
@@ -21,7 +21,7 @@ use crate::types::channel::MultiChannel;
 use crate::types::enumeration::Enumeration;
 use crate::types::mysql::Schema;
 use crate::types::subscribe::{SubscribeEvent, SubscribeTarget, SubscribeTask};
-use crate::validation::{get_task, subscribe, unsubscribe};
+use crate::validation::{get_blocks, get_task, subscribe, unsubscribe};
 
 pub struct TendermintPlugin {
     sub_events: Option<SubscribeEvents>,
@@ -72,7 +72,7 @@ impl Plugin for TendermintPlugin {
         self.init();
         self.register_jsonrpc();
         self.load_tasks();
-        // self.load_schema();
+        self.init_mysql();
     }
 
     fn startup(&mut self) {
@@ -98,7 +98,6 @@ impl Plugin for TendermintPlugin {
                 if app.is_quiting() {
                     break;
                 }
-                thread::sleep(Duration::from_secs(1));
                 let sub_events_try_lock = sub_events.try_lock();
                 if sub_events_try_lock.is_none() {
                     continue;
@@ -318,7 +317,6 @@ impl Plugin for TendermintPlugin {
 
                                 Self::sync_event(&rocks_channel, sub_event);
                                 sub_event.curr_height += 1;
-                                break;
                             }
                         }
                     }
@@ -342,10 +340,13 @@ impl TendermintPlugin {
         self.tm_block_mongo_sync = Some(libs::opts::bool("tendermint::block-mongo-sync").unwrap());
         self.tm_tx_mongo_sync = Some(libs::opts::bool("tendermint::tx-mongo-sync").unwrap());
         self.tm_block_publish = Some(libs::opts::bool("tendermint::block-rabbit-mq-publish").unwrap());
-        self.tm_tx_publish = Some(libs::opts::bool("tendermint::tx-rabiit-mq-publish").unwrap());
+        self.tm_tx_publish = Some(libs::opts::bool("tendermint::tx-rabbit-mq-publish").unwrap());
     }
 
-    fn load_schema(&mut self) {
+    fn init_mysql(&mut self) {
+        if let None = app::find_plugin("MySqlPlugin") {
+            return;
+        }
         let json_str = fs::read_to_string("schema/mysql.json").unwrap();
         let json_schema: Value = serde_json::from_str(json_str.as_str()).unwrap();
         let schema_map = json_schema.as_object().unwrap();
@@ -366,6 +367,24 @@ impl TendermintPlugin {
                 println!("error={}", err.to_string());
             }
         }
+
+        let plugin_handle = app::get_plugin::<JsonRpcPlugin>();
+        let mut plugin = plugin_handle.lock().unwrap();
+        let jsonrpc = plugin.downcast_mut::<JsonRpcPlugin>().unwrap();
+
+        let pool = mysql.get_pool();
+        jsonrpc.add_method(String::from("tm_mysql_get_blocks"), move |params: Params| {
+            let params: Map<String, Value> = params.parse().unwrap();
+            let verified = get_blocks::verify(&params);
+            if verified.is_err() {
+                return Box::new(futures::future::ok(Value::String(verified.unwrap_err().to_string())));
+            }
+            let order = get_str(&params, "order").unwrap();
+            let query = format!("select * from tm_block where height >= :from_height and height <= :to_height order by 1 {}", order);
+            let picked_params = pick(&params, vec!["from_height", "to_height"]).unwrap();
+            let result = MySqlPlugin::query_static(&pool, query, get_params(&picked_params)).unwrap();
+            Box::new(futures::future::ok(Value::Array(result)))
+        });
     }
 
     fn register_jsonrpc(&self) {
@@ -383,7 +402,7 @@ impl TendermintPlugin {
             let params: Map<String, Value> = params.parse().unwrap();
             let verified = subscribe::verify(&params);
             if verified.is_err() {
-                return Box::new(futures::future::ready(Ok(Value::String(verified.unwrap_err()))));
+                return Box::new(futures::future::ok(Value::String(verified.unwrap_err().to_string())));
             }
             let message = TendermintMsg::new(TendermintMethod::Subscribe, Value::Object(params.clone()));
             let _ = tm_channel.send(message);
@@ -392,9 +411,9 @@ impl TendermintPlugin {
             let value = get_static(&rocks_db, task_id.as_str());
             if value.is_null() {
                 let task_id = SubscribeTask::task_id(CHAIN, &params);
-                Box::new(futures::future::ready(Ok(Value::String(format!("subscription requested! task_id={}", task_id)))))
+                Box::new(futures::future::ok(Value::String(format!("subscription requested! task_id={}", task_id))))
             } else {
-                Box::new(futures::future::ready(Ok(Value::String(format!("already exist task! task_id={}", task_id)))))
+                Box::new(futures::future::ok(Value::String(format!("already exist task! task_id={}", task_id))))
             }
         });
 
@@ -404,7 +423,7 @@ impl TendermintPlugin {
             let params: Map<String, Value> = params.parse().unwrap();
             let verified = unsubscribe::verify(&params);
             if verified.is_err() {
-                return Box::new(futures::future::ready(Ok(Value::String(verified.unwrap_err()))));
+                return Box::new(futures::future::ok(Value::String(verified.unwrap_err().to_string())));
             }
 
             let tm_msg = TendermintMsg::new(TendermintMethod::Unsubscribe, Value::Object(params.clone()));
@@ -413,9 +432,9 @@ impl TendermintPlugin {
             let task_id = get_str(&params, "task_id").unwrap();
             let value = get_static(&rocks_db, task_id);
             if value.is_null() {
-                Box::new(futures::future::ready(Ok(Value::String(format!("task does not exist! task_id={}", task_id)))))
+                Box::new(futures::future::ok(Value::String(format!("task does not exist! task_id={}", task_id))))
             } else {
-                Box::new(futures::future::ready(Ok(Value::String(format!("unsubscription requested! task_id={}", task_id)))))
+                Box::new(futures::future::ok(Value::String(format!("unsubscription requested! task_id={}", task_id))))
             }
         });
 
@@ -424,7 +443,7 @@ impl TendermintPlugin {
             let params: Map<String, Value> = params.parse().unwrap();
             let verified = get_task::verify(&params);
             if verified.is_err() {
-                return Box::new(futures::future::ready(Ok(Value::String(verified.unwrap_err()))));
+                return Box::new(futures::future::ok(Value::String(verified.unwrap_err().to_string())));
             }
 
             let prefix = match params.get("task_id") {
@@ -432,7 +451,7 @@ impl TendermintPlugin {
                 Some(task_id) => task_id.as_str().unwrap(),
             };
             let tasks = get_by_prefix_static(&rocks_db, prefix);
-            Box::new(futures::future::ready(Ok(tasks)))
+            Box::new(futures::future::ok(tasks))
         });
     }
 

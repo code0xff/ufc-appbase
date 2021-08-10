@@ -152,36 +152,4 @@ mod subscribe_test {
         let subscribe_event = SubscribeEvent::new("tendermint", &params);
         assert_eq!(subscribe_event.event_id(), "tendermint:block:cosmoshub-4:1");
     }
-
-    #[test]
-    fn subscribe_event_handle_err_fallback_test() {
-        let mut params = Map::new();
-        params.insert(String::from("sub_id"), json!("cosmoshub-4"));
-        params.insert(String::from("start_height"), json!(1u64));
-        params.insert(String::from("target"), json!("block"));
-        params.insert(String::from("nodes"), json!(["https://api.cosmos.network", "https://api.cosmos2.network"]));
-
-        let rocks_channel = app::get_channel(String::from("rocks"));
-
-        let mut subscribe_event = SubscribeEvent::new("tendermint", &params);
-        subscribe_event.handle_err(String::from("error_test"));
-
-        assert_eq!(subscribe_event.node_idx, 1);
-    }
-
-    #[test]
-    fn subscribe_event_handle_err_test() {
-        let mut params = Map::new();
-        params.insert(String::from("sub_id"), json!("cosmoshub-4"));
-        params.insert(String::from("start_height"), json!(1u64));
-        params.insert(String::from("target"), json!("block"));
-        params.insert(String::from("nodes"), json!(["https://api.cosmos.network"]));
-
-        let rocks_channel = app::get_channel(String::from("rocks"));
-
-        let mut subscribe_event = SubscribeEvent::new("tendermint", &params);
-        subscribe_event.handle_err(String::from("error_test"));
-
-        assert_eq!(SubscribeStatus::Error, subscribe_event.status);
-    }
 }

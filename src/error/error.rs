@@ -8,6 +8,7 @@ pub enum ExpectedError {
     TypeError(String),
     NoneError(String),
     ProcessError(String),
+    InvalidError(String),
 }
 
 impl From<smtp::Error> for ExpectedError {
@@ -37,6 +38,7 @@ impl Display for ExpectedError {
             ExpectedError::TypeError(err) => write!(f, "{}", err),
             ExpectedError::NoneError(err) => write!(f, "{}", err),
             ExpectedError::ProcessError(err) => write!(f, "{}", err),
+            ExpectedError::InvalidError(err) => write!(f, "{}", err),
         }
     }
 }

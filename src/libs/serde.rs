@@ -26,7 +26,7 @@ pub fn get_str<'a>(params: &'a Map<String, Value>, name: &'a str) -> Result<&'a 
     let unwrapped = unwrap(params, name)?;
     let opt_val = unwrapped.as_str();
     match opt_val {
-        None => Err(ExpectedError::NoneError(format!("{} is not {}", name, "str"))),
+        None => Err(ExpectedError::NoneError(format!("{} is not {}!", name, "str"))),
         Some(val) => Ok(val),
     }
 }
@@ -40,7 +40,7 @@ pub fn get_u64(params: &Map<String, Value>, name: &str) -> Result<u64, ExpectedE
     let unwrapped = unwrap(params, name)?;
     let opt_val = unwrapped.as_u64();
     match opt_val {
-        None => Err(ExpectedError::TypeError(format!("{} is not {}", name, "u64"))),
+        None => Err(ExpectedError::TypeError(format!("{} is not {}!", name, "u64"))),
         Some(val) => Ok(val),
     }
 }
@@ -49,7 +49,7 @@ pub fn get_object<'a>(params: &'a Map<String, Value>, name: &'a str) -> Result<&
     let unwrapped = unwrap(params, name)?;
     let opt_val = unwrapped.as_object();
     match opt_val {
-        None => Err(ExpectedError::TypeError(format!("{} is not {}", name, "object"))),
+        None => Err(ExpectedError::TypeError(format!("{} is not {}!", name, "object"))),
         Some(val) => Ok(val),
     }
 }
@@ -67,7 +67,7 @@ pub fn get_bool(params: &Map<String, Value>, name: &str) -> Result<bool, Expecte
     let unwrapped = unwrap(params, name)?;
     let opt_val = unwrapped.as_bool();
     match opt_val {
-        None => Err(ExpectedError::TypeError(format!("{} is not {}", name, "bool"))),
+        None => Err(ExpectedError::TypeError(format!("{} is not {}!", name, "bool"))),
         Some(val) => Ok(val),
     }
 }

@@ -1,13 +1,11 @@
-use std::collections::HashMap;
-
 use appbase::*;
 use mysql::*;
 use mysql::prelude::Queryable;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{json, Map, Value, Number};
 
-use crate::libs::opts;
 use crate::libs::mysql::get_params;
+use crate::libs::opts;
 use crate::libs::serde::{get_object, get_str};
 use crate::message;
 use crate::plugin::jsonrpc::JsonRpcPlugin;
@@ -68,25 +66,45 @@ impl MySqlPlugin {
         });
     }
 
+    pub fn get_pool(&self) -> Pool {
+        self.pool.as_ref().unwrap().clone()
+    }
+
     pub fn execute(&self, query: String, params: Params) -> Result<()> {
         let pool = self.pool.as_ref().unwrap();
         let _ = pool.get_conn().unwrap().exec_drop(query, params)?;
         Ok(())
     }
 
-    pub fn query(&self, query: String, params: Params) -> Result<Vec<Value>> {
-        let pool = self.pool.as_ref().unwrap();
+    pub fn query_static(pool: &Pool, query: String, params: Params) -> Result<Vec<Value>> {
         let rows: Vec<Row> = pool.get_conn().unwrap().exec(query, params)?;
 
-        let mut result: Vec<Value> = Vec::new();
-        for row in rows.iter() {
-            let mut converted = HashMap::new();
-            for column in row.columns_ref() {
-                let column_value = &row[column.name_str().as_ref()];
-                converted.insert(String::from(column.name_str()), column_value.as_sql(true));
+        let mut converted_rows: Vec<Value> = Vec::new();
+        for raw_row in rows.iter() {
+            let mut converted_row = Map::new();
+            for column in raw_row.columns_ref() {
+                let column_value = &raw_row[column.name_str().as_ref()];
+                let value = match column_value {
+                    mysql::Value::NULL => serde_json::Value::Null,
+                    mysql::Value::Bytes(b) => serde_json::Value::String(String::from_utf8(b.clone()).unwrap()),
+                    mysql::Value::Int(i) => serde_json::Value::Number(Number::from(*i)),
+                    mysql::Value::UInt(ui) => serde_json::Value::Number(Number::from(*ui)),
+                    mysql::Value::Float(f) => serde_json::Value::Number(Number::from_f64(*f as f64).unwrap()),
+                    mysql::Value::Double(d) => serde_json::Value::Number(Number::from_f64(*d).unwrap()),
+                    mysql::Value::Date(y, m, d, h, mi, s, ms) =>
+                        serde_json::Value::String(format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:06}", y, m, d, h, mi, s, ms)),
+                    mysql::Value::Time(n, d, h, mi, s, ms) => {
+                        if *n {
+                            serde_json::Value::String(format!("-{:03}:{:02}:{:02}.{:06}", d * 24 + u32::from(*h), mi, s, ms))
+                        } else {
+                            serde_json::Value::String(format!("{:03}:{:02}:{:02}.{:06}", d * 24 + u32::from(*h), mi, s, ms))
+                        }
+                    }
+                };
+                converted_row.insert(String::from(column.name_str()), value);
             }
-            result.push(json!(converted));
+            converted_rows.push(Value::Object(converted_row));
         }
-        Ok(result)
+        Ok(converted_rows)
     }
 }

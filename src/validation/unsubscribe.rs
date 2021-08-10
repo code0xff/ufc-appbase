@@ -1,12 +1,10 @@
 use serde_json::{Map, Value};
 
+use crate::error::error::ExpectedError;
 use crate::validation::verify::verify_default;
 
-pub fn verify(params: &Map<String, Value>) -> Result<(), String> {
-    let verified = verify_default(params, vec![("task_id", "string")]);
-    if verified.is_err() {
-        return Err(verified.unwrap_err());
-    }
+pub fn verify(params: &Map<String, Value>) -> Result<(), ExpectedError> {
+    verify_default(params, vec![("task_id", "string")])?;
     Ok(())
 }
 
