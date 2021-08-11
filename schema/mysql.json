@@ -95,6 +95,10 @@
         "size": 100,
         "nullable": false
       },
+      "fee": {
+        "type": "text",
+        "nullable": true
+      },
       "raw_log": {
         "type": "text",
         "nullable": true

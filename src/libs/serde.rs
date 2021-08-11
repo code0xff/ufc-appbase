@@ -2,16 +2,31 @@ use serde_json::{Map, Value};
 
 use crate::error::error::ExpectedError;
 
-pub fn pick(params: &Map<String, Value>, names: Vec<&str>) -> Result<Map<String, Value>, ExpectedError> {
+pub fn select_value(params: &Map<String, Value>, names: Vec<&str>) -> Result<Map<String, Value>, ExpectedError> {
     let mut values = Map::new();
     for name in names.into_iter() {
-        if params.get(name).is_none() {
-            return Err(ExpectedError::NoneError(format!("{} does not belong to map!", name)));
-        } else {
-            values.insert(String::from(name), params.get(name).unwrap().clone());
-        }
+        let value = find_value(params, name);
+        values.insert(String::from(name), value);
     }
     Ok(values)
+}
+
+fn find_value(values: &Map<String, Value>, target_name: &str) -> Value {
+    if values.get(target_name).is_some() {
+        values.get(target_name).unwrap().clone()
+    } else {
+        for (_, value) in values.iter() {
+            if value.is_object() {
+                let value = find_value(value.as_object().unwrap(), target_name);
+                if value.is_null() {
+                    continue;
+                } else {
+                    return value;
+                }
+            }
+        }
+        Value::Null
+    }
 }
 
 pub fn unwrap<'a>(params: &'a Map<String, Value>, name: &'a str) -> Result<&'a Value, ExpectedError> {
@@ -81,7 +96,7 @@ pub fn get_str_by_path<'a>(params: &'a Map<String, Value>, path: &'a str) -> Res
     let last = split.clone().last().unwrap();
     for name in split {
         if name == last {
-            let target= get_str(params, name)?;
+            let target = get_str(params, name)?;
             return Ok(target);
         } else {
             params = get_object(params, name)?;
@@ -108,7 +123,7 @@ pub fn get_type(value: &Value) -> String {
             } else {
                 "number"
             }
-        },
+        }
         Value::String(_) => "string",
         Value::Array(_) => "array",
         Value::Object(_) => "object",

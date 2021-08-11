@@ -15,7 +15,7 @@ use crate::error::error::ExpectedError;
 use crate::libs::mysql::get_params;
 use crate::libs::request;
 use crate::libs::rocks::{get_by_prefix_static, get_static};
-use crate::libs::serde::{get_array, get_object, get_str, get_str_by_path, get_string, pick};
+use crate::libs::serde::{get_array, get_object, get_str, get_str_by_path, get_string, select_value};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::plugin::mongo::{MongoMsg, MongoPlugin};
 use crate::plugin::mysql::{MySqlMsg, MySqlPlugin};
@@ -337,7 +337,7 @@ impl TendermintPlugin {
             }
             let order = get_str(&params, "order").unwrap();
             let query = format!("select * from tm_block where height >= :from_height and height <= :to_height order by 1 {}", order);
-            let picked_params = pick(&params, vec!["from_height", "to_height"]).unwrap();
+            let picked_params = select_value(&params, vec!["from_height", "to_height"]).unwrap();
             let result = MySqlPlugin::query_static(&pool, query, get_params(&picked_params)).unwrap();
             Box::new(futures::future::ok(Value::Array(result)))
         });
@@ -353,12 +353,12 @@ impl TendermintPlugin {
             }
             let (query, picked_params) = if params.get("txhash").is_some() {
                 let query = String::from("select * from tm_tx where txhash=:txhash");
-                let picked_params = pick(&params, vec!["txhash"]).unwrap();
+                let picked_params = select_value(&params, vec!["txhash"]).unwrap();
                 (query, picked_params)
             } else {
                 let order = get_str(&params, "order").unwrap();
                 let query = format!("select * from tm_tx where height >= :from_height and height <= :to_height order by 1 {}", order);
-                let picked_params = pick(&params, vec!["from_height", "to_height"]).unwrap();
+                let picked_params = select_value(&params, vec!["from_height", "to_height"]).unwrap();
                 (query, picked_params)
             };
             let result = MySqlPlugin::query_static(&pool, query, get_params(&picked_params)).unwrap();
@@ -529,7 +529,7 @@ impl TendermintPlugin {
     fn mysql_send(mysql_channel: &channel::Sender, schema: Schema, values: &Map<String, Value>) -> Result<(), ExpectedError> {
         let insert_query = schema.insert_query;
         let names: Vec<&str> = schema.attributes.iter().map(|attribute| { attribute.name.as_str() }).collect();
-        let picked_value = pick(values, names)?;
+        let picked_value = select_value(values, names)?;
         let mysql_msg = MySqlMsg::new(String::from(insert_query), Value::Object(picked_value));
         let _ = mysql_channel.send(mysql_msg)?;
         Ok(())
