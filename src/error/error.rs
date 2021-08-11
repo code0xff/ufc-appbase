@@ -1,7 +1,8 @@
-use std::fmt::{Display, Formatter};
-use lettre::transport::smtp;
-use std::str::ParseBoolError;
 use std::env::VarError;
+use std::fmt::{Display, Formatter};
+use std::str::ParseBoolError;
+
+use lettre::transport::smtp;
 
 #[derive(Debug)]
 pub enum ExpectedError {
@@ -9,6 +10,9 @@ pub enum ExpectedError {
     NoneError(String),
     ProcessError(String),
     InvalidError(String),
+    RequestError(String),
+    ParsingError(String),
+    ChannelError(String),
 }
 
 impl From<smtp::Error> for ExpectedError {
@@ -32,6 +36,24 @@ impl From<VarError> for ExpectedError {
     }
 }
 
+impl From<reqwest::Error> for ExpectedError {
+    fn from(err: reqwest::Error) -> Self {
+        ExpectedError::RequestError(err.to_string())
+    }
+}
+
+impl From<serde_json::Error> for ExpectedError {
+    fn from(err: serde_json::Error) -> Self {
+        ExpectedError::ParsingError(err.to_string())
+    }
+}
+
+impl<T> From<tokio::sync::broadcast::error::SendError<T>> for ExpectedError {
+    fn from(err: tokio::sync::broadcast::error::SendError<T>) -> Self {
+        ExpectedError::ChannelError(err.to_string())
+    }
+}
+
 impl Display for ExpectedError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -39,6 +61,9 @@ impl Display for ExpectedError {
             ExpectedError::NoneError(err) => write!(f, "{}", err),
             ExpectedError::ProcessError(err) => write!(f, "{}", err),
             ExpectedError::InvalidError(err) => write!(f, "{}", err),
+            ExpectedError::RequestError(err) => write!(f, "{}", err),
+            ExpectedError::ParsingError(err) => write!(f, "{}", err),
+            ExpectedError::ChannelError(err) => write!(f, "{}", err),
         }
     }
 }

@@ -10,14 +10,14 @@ use crate::types::enumeration::Enumeration;
 #[derive(Clone, Debug)]
 pub struct Schema {
     table: String,
-    attributes: Vec<Attribute>,
+    pub attributes: Vec<Attribute>,
     pub create_table: String,
     pub insert_query: String,
 }
 
 #[derive(Clone, Debug)]
-struct Attribute {
-    name: String,
+pub struct Attribute {
+    pub name: String,
     _type: String,
     size: Option<u32>,
     nullable: bool,

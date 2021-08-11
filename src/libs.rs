@@ -3,3 +3,4 @@ pub mod mysql;
 pub mod rocks;
 pub mod mongo;
 pub mod opts;
+pub mod request;

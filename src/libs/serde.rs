@@ -72,6 +72,24 @@ pub fn get_bool(params: &Map<String, Value>, name: &str) -> Result<bool, Expecte
     }
 }
 
+pub fn get_str_by_path<'a>(params: &'a Map<String, Value>, path: &'a str) -> Result<&'a str, ExpectedError> {
+    let split = path.split(">");
+    if split.clone().count() == 0 {
+        return Err(ExpectedError::InvalidError(String::from("path cannot be empty!")));
+    }
+    let mut params = params;
+    let last = split.clone().last().unwrap();
+    for name in split {
+        if name == last {
+            let target= get_str(params, name)?;
+            return Ok(target);
+        } else {
+            params = get_object(params, name)?;
+        }
+    }
+    Err(ExpectedError::NoneError(format!("value does not exist in the path! path={}", path)))
+}
+
 pub fn get_string_vec(params: &Map<String, Value>, name: &str) -> Vec<String> {
     params.get(name).unwrap().as_array().unwrap().iter().map(|item| { String::from(item.as_str().unwrap()) }).collect()
 }
