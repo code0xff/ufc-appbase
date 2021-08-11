@@ -1,9 +1,10 @@
-use std::{fs};
 use std::collections::HashMap;
+use std::fs;
 use std::str::FromStr;
 use std::sync::Arc;
 
 use appbase::*;
+use appbase::plugin::State;
 use futures::lock::Mutex as FutureMutex;
 use jsonrpc_core::*;
 use serde::{Deserialize, Serialize};
@@ -20,9 +21,8 @@ use crate::plugin::rocks::{RocksMethod, RocksMsg, RocksPlugin};
 use crate::types::channel::MultiChannel;
 use crate::types::enumeration::Enumeration;
 use crate::types::mysql::Schema;
-use crate::types::subscribe::{SubscribeEvent, SubscribeTarget, SubscribeTask};
-use crate::validation::{get_blocks, get_task, subscribe, unsubscribe};
-use appbase::plugin::State;
+use crate::types::subscribe::{SubscribeEvent, SubscribeTarget, SubscribeTask, SubscribeStatus};
+use crate::validation::{get_blocks, get_task, get_txs, subscribe, unsubscribe, resubscribe, stop_subscribe};
 
 pub struct TendermintPlugin {
     sub_events: Option<SubscribeEvents>,
@@ -42,7 +42,7 @@ const TASK_PREFIX: &str = "task:tendermint";
 
 type SubscribeEvents = Arc<FutureMutex<HashMap<String, SubscribeEvent>>>;
 
-message!((TendermintMsg; {value: Value}); (TendermintMethod; {Subscribe: "subscribe"}, {Unsubscribe: "unsubscribe"}));
+message!((TendermintMsg; {value: Value}); (TendermintMethod; {Subscribe: "subscribe"}, {Resubscribe: "resubscribe"}, {Stop: "stop"}, {Unsubscribe: "unsubscribe"}));
 
 plugin::requires!(TendermintPlugin; JsonRpcPlugin, RocksPlugin);
 
@@ -116,14 +116,35 @@ impl Plugin for TendermintPlugin {
                             let task = SubscribeTask::from(&new_event, String::from(""));
                             let msg = RocksMsg::new(RocksMethod::Put, new_event.task_id, Value::String(json!(task).to_string()));
                             let _ = rocks_channel.send(msg);
-                        }
+                        },
                         TendermintMethod::Unsubscribe => {
                             let task_id = get_string(&params, "task_id").unwrap();
                             sub_events_lock.remove(&task_id);
 
                             let msg = RocksMsg::new(RocksMethod::Delete, task_id, Value::Null);
                             let _ = rocks_channel.send(msg);
-                        }
+                        },
+                        TendermintMethod::Resubscribe => {
+                            let task_id = get_str(&params, "task_id").unwrap();
+                            let mut sub_event = sub_events_lock.get(task_id).unwrap().clone();
+                            sub_event.node_idx = 0;
+                            sub_event.status = SubscribeStatus::Working;
+                            sub_events_lock.insert(sub_event.task_id.clone(), sub_event.clone());
+
+                            let task = SubscribeTask::from(&sub_event, String::from(""));
+                            let msg = RocksMsg::new(RocksMethod::Put, sub_event.task_id, Value::String(json!(task).to_string()));
+                            let _ = rocks_channel.send(msg);
+                        },
+                        TendermintMethod::Stop => {
+                            let task_id = get_str(&params, "task_id").unwrap();
+                            let mut sub_event = sub_events_lock.get(task_id).unwrap().clone();
+                            sub_event.status = SubscribeStatus::Stopped;
+                            sub_events_lock.insert(sub_event.task_id.clone(), sub_event.clone());
+
+                            let task = SubscribeTask::from(&sub_event, String::from(""));
+                            let msg = RocksMsg::new(RocksMethod::Put, sub_event.task_id, Value::String(json!(task).to_string()));
+                            let _ = rocks_channel.send(msg);
+                        },
                     };
                 }
 
@@ -380,11 +401,36 @@ impl TendermintPlugin {
             let params: Map<String, Value> = params.parse().unwrap();
             let verified = get_blocks::verify(&params);
             if verified.is_err() {
-                return Box::new(futures::future::ok(Value::String(verified.unwrap_err().to_string())));
+                let mut error = Map::new();
+                error.insert(String::from("error"), Value::String(verified.unwrap_err().to_string()));
+                return Box::new(futures::future::ok(Value::Object(error)));
             }
             let order = get_str(&params, "order").unwrap();
             let query = format!("select * from tm_block where height >= :from_height and height <= :to_height order by 1 {}", order);
             let picked_params = pick(&params, vec!["from_height", "to_height"]).unwrap();
+            let result = MySqlPlugin::query_static(&pool, query, get_params(&picked_params)).unwrap();
+            Box::new(futures::future::ok(Value::Array(result)))
+        });
+
+        let pool = mysql.get_pool();
+        jsonrpc.add_method(String::from("tm_mysql_get_txs"), move |params: Params| {
+            let params: Map<String, Value> = params.parse().unwrap();
+            let verified = get_txs::verify(&params);
+            if verified.is_err() {
+                let mut error = Map::new();
+                error.insert(String::from("error"), Value::String(verified.unwrap_err().to_string()));
+                return Box::new(futures::future::ok(Value::Object(error)));
+            }
+            let (query, picked_params) = if params.get("txhash").is_some() {
+                let query = String::from("select * from tm_tx where txhash=:txhash");
+                let picked_params = pick(&params, vec!["txhash"]).unwrap();
+                (query, picked_params)
+            } else {
+                let order = get_str(&params, "order").unwrap();
+                let query = format!("select * from tm_tx where height >= :from_height and height <= :to_height order by 1 {}", order);
+                let picked_params = pick(&params, vec!["from_height", "to_height"]).unwrap();
+                (query, picked_params)
+            };
             let result = MySqlPlugin::query_static(&pool, query, get_params(&picked_params)).unwrap();
             Box::new(futures::future::ok(Value::Array(result)))
         });
@@ -405,18 +451,21 @@ impl TendermintPlugin {
             let params: Map<String, Value> = params.parse().unwrap();
             let verified = subscribe::verify(&params);
             if verified.is_err() {
-                return Box::new(futures::future::ok(Value::String(verified.unwrap_err().to_string())));
+                let mut error = Map::new();
+                error.insert(String::from("error"), Value::String(verified.unwrap_err().to_string()));
+                return Box::new(futures::future::ok(Value::Object(error)));
             }
-            let message = TendermintMsg::new(TendermintMethod::Subscribe, Value::Object(params.clone()));
-            let _ = tm_channel.send(message);
             let task_id = SubscribeTask::task_id(CHAIN, &params);
-
             let value = get_static(&rocks_db, task_id.as_str());
             if value.is_null() {
-                let task_id = SubscribeTask::task_id(CHAIN, &params);
+                let message = TendermintMsg::new(TendermintMethod::Subscribe, Value::Object(params.clone()));
+                let _ = tm_channel.send(message);
+
                 Box::new(futures::future::ok(Value::String(format!("subscription requested! task_id={}", task_id))))
             } else {
-                Box::new(futures::future::ok(Value::String(format!("already exist task! task_id={}", task_id))))
+                let mut error = Map::new();
+                error.insert(String::from("error"), Value::String(format!("already exist task! task_id={}", task_id)));
+                Box::new(futures::future::ok(Value::Object(error)))
             }
         });
 
@@ -426,18 +475,72 @@ impl TendermintPlugin {
             let params: Map<String, Value> = params.parse().unwrap();
             let verified = unsubscribe::verify(&params);
             if verified.is_err() {
-                return Box::new(futures::future::ok(Value::String(verified.unwrap_err().to_string())));
+                let mut error = Map::new();
+                error.insert(String::from("error"), Value::String(verified.unwrap_err().to_string()));
+                return Box::new(futures::future::ok(Value::Object(error)));
             }
-
-            let tm_msg = TendermintMsg::new(TendermintMethod::Unsubscribe, Value::Object(params.clone()));
-            let _ = tm_channel.send(tm_msg);
 
             let task_id = get_str(&params, "task_id").unwrap();
             let value = get_static(&rocks_db, task_id);
             if value.is_null() {
-                Box::new(futures::future::ok(Value::String(format!("task does not exist! task_id={}", task_id))))
+                let mut error = Map::new();
+                error.insert(String::from("error"), Value::String(format!("task does not exist! task_id={}", task_id)));
+                Box::new(futures::future::ok(Value::Object(error)))
             } else {
+                let tm_msg = TendermintMsg::new(TendermintMethod::Unsubscribe, Value::Object(params.clone()));
+                let _ = tm_channel.send(tm_msg);
+
                 Box::new(futures::future::ok(Value::String(format!("unsubscription requested! task_id={}", task_id))))
+            }
+        });
+
+        let tm_channel = self.channels.as_ref().unwrap().get("tendermint");
+        let rocks_db = rocks.get_db();
+        jsonrpc.add_method(String::from("tm_resubscribe"), move |params: Params| {
+            let params: Map<String, Value> = params.parse().unwrap();
+            let verified = resubscribe::verify(&params);
+            if verified.is_err() {
+                let mut error = Map::new();
+                error.insert(String::from("error"), Value::String(verified.unwrap_err().to_string()));
+                return Box::new(futures::future::ok(Value::Object(error)));
+            }
+
+            let task_id = get_str(&params, "task_id").unwrap();
+            let value = get_static(&rocks_db, task_id);
+            if value.is_null() {
+                let mut error = Map::new();
+                error.insert(String::from("error"), Value::String(format!("subscription does not exist! task_id={}", task_id)));
+                Box::new(futures::future::ok(Value::Object(error)))
+            } else {
+                let message = TendermintMsg::new(TendermintMethod::Resubscribe, Value::Object(params.clone()));
+                let _ = tm_channel.send(message);
+
+                Box::new(futures::future::ok(Value::String(format!("resubscription requested! task_id={}", task_id))))
+            }
+        });
+
+        let tm_channel = self.channels.as_ref().unwrap().get("tendermint");
+        let rocks_db = rocks.get_db();
+        jsonrpc.add_method(String::from("tm_stop_subscription"), move |params: Params| {
+            let params: Map<String, Value> = params.parse().unwrap();
+            let verified = stop_subscribe::verify(&params);
+            if verified.is_err() {
+                let mut error = Map::new();
+                error.insert(String::from("error"), Value::String(verified.unwrap_err().to_string()));
+                return Box::new(futures::future::ok(Value::Object(error)));
+            }
+
+            let task_id = get_str(&params, "task_id").unwrap();
+            let value = get_static(&rocks_db, task_id);
+            if value.is_null() {
+                let mut error = Map::new();
+                error.insert(String::from("error"), Value::String(format!("task does not exist! task_id={}", task_id)));
+                Box::new(futures::future::ok(Value::Object(error)))
+            } else {
+                let tm_msg = TendermintMsg::new(TendermintMethod::Stop, Value::Object(params.clone()));
+                let _ = tm_channel.send(tm_msg);
+
+                Box::new(futures::future::ok(Value::String(format!("stop subscription requested! task_id={}", task_id))))
             }
         });
 
@@ -446,7 +549,9 @@ impl TendermintPlugin {
             let params: Map<String, Value> = params.parse().unwrap();
             let verified = get_task::verify(&params);
             if verified.is_err() {
-                return Box::new(futures::future::ok(Value::String(verified.unwrap_err().to_string())));
+                let mut error = Map::new();
+                error.insert(String::from("error"), Value::String(verified.unwrap_err().to_string()));
+                return Box::new(futures::future::ok(Value::Object(error)));
             }
 
             let prefix = match params.get("task_id") {
@@ -470,10 +575,8 @@ impl TendermintPlugin {
             .for_each(|raw_task| {
                 let task = raw_task.as_object().unwrap();
                 let event = SubscribeEvent::from(task);
-                if event.is_workable() {
-                    let mut sub_events_lock = sub_events.try_lock().unwrap();
-                    sub_events_lock.insert(event.task_id.clone(), event);
-                }
+                let mut sub_events_lock = sub_events.try_lock().unwrap();
+                sub_events_lock.insert(event.task_id.clone(), event);
             });
     }
 

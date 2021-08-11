@@ -44,7 +44,9 @@ impl Plugin for RocksPlugin {
             let params: Map<String, Value> = params.parse().unwrap();
             let verified = find_by_key::verify(&params);
             if verified.is_err() {
-                return Box::new(futures::future::ok(Value::String(verified.unwrap_err().to_string())));
+                let mut error = Map::new();
+                error.insert(String::from("error"), Value::String(verified.unwrap_err().to_string()));
+                return Box::new(futures::future::ok(Value::Object(error)));
             }
             let key = get_str(&params, "key").unwrap();
             let value = Self::find_by_prefix_static(&db, key);

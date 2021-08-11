@@ -46,7 +46,7 @@ impl SubscribeEvent {
             start_height: get_u64(params, "start_height").unwrap(),
             curr_height: get_u64(params, "curr_height").unwrap(),
             nodes: get_string_vec(params, "nodes"),
-            node_idx: 0,
+            node_idx: get_u64(params, "node_idx").unwrap() as u16,
             status: SubscribeStatus::find(get_str(params, "status").unwrap()).unwrap(),
         }
     }
@@ -83,21 +83,23 @@ pub struct SubscribeTask {
     pub start_height: u64,
     pub curr_height: u64,
     pub nodes: Vec<String>,
+    pub node_idx: u16,
     pub status: String,
     pub err_msg: String,
 }
 
 impl SubscribeTask {
-    pub fn from(sub_block: &SubscribeEvent, err_msg: String) -> Self {
+    pub fn from(sub_event: &SubscribeEvent, err_msg: String) -> Self {
         SubscribeTask {
-            task_id: sub_block.task_id.clone(),
-            target: sub_block.target.value(),
-            chain: sub_block.chain.clone(),
-            sub_id: sub_block.sub_id.clone(),
-            start_height: sub_block.start_height,
-            curr_height: sub_block.curr_height,
-            nodes: sub_block.nodes.clone(),
-            status: sub_block.status.value(),
+            task_id: sub_event.task_id.clone(),
+            target: sub_event.target.value(),
+            chain: sub_event.chain.clone(),
+            sub_id: sub_event.sub_id.clone(),
+            start_height: sub_event.start_height,
+            curr_height: sub_event.curr_height,
+            nodes: sub_event.nodes.clone(),
+            node_idx: sub_event.node_idx,
+            status: sub_event.status.value(),
             err_msg,
         }
     }
@@ -108,7 +110,7 @@ impl SubscribeTask {
 }
 
 enumeration!(SubscribeTarget; {Block: "block"}, {Tx: "tx"});
-enumeration!(SubscribeStatus; {Working: "working"}, {Error: "error"});
+enumeration!(SubscribeStatus; {Working: "working"}, {Stopped: "stopped"}, {Error: "error"});
 
 #[cfg(test)]
 mod subscribe_test {
