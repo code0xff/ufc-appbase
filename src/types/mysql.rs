@@ -2,20 +2,22 @@ use std::fmt::Debug;
 
 use jsonrpc_core::Value;
 
+use crate::enumeration;
 use crate::error::error::ExpectedError;
 use crate::libs::serde::{get_array, get_bool, get_object, get_string};
+use crate::types::enumeration::Enumeration;
 
 #[derive(Clone, Debug)]
 pub struct Schema {
     table: String,
-    attributes: Vec<Attribute>,
+    pub attributes: Vec<Attribute>,
     pub create_table: String,
     pub insert_query: String,
 }
 
 #[derive(Clone, Debug)]
-struct Attribute {
-    name: String,
+pub struct Attribute {
+    pub name: String,
     _type: String,
     size: Option<u32>,
     nullable: bool,
@@ -107,3 +109,5 @@ impl Schema {
         }
     }
 }
+
+enumeration!(Order; {Asc: "asc"}, {Desc: "desc"});

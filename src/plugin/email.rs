@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use appbase::*;
 use lettre::{Message, SmtpTransport, Transport};
 use lettre::transport::smtp::authentication::Credentials;
@@ -12,15 +10,21 @@ use crate::libs::serde::get_str;
 use crate::message;
 
 pub struct EmailPlugin {
-    monitor: Option<SubscribeHandle>,
+    monitor: Option<channel::Receiver>,
 }
 
 message!(EmailMsg; {to: String}, {subject: String}, {body: String});
 
-appbase_plugin_requires!(EmailPlugin; );
+plugin::requires!(EmailPlugin; );
 
 impl Plugin for EmailPlugin {
     fn new() -> Self {
+        app::arg(clap::Arg::new("email::smtp-username").long("smtp-username").takes_value(true));
+        app::arg(clap::Arg::new("email::smtp-password").long("smtp-password").takes_value(true));
+        app::arg(clap::Arg::new("email::smtp-relay").long("smtp-relay").takes_value(true));
+        app::arg(clap::Arg::new("email::from").long("email-from").takes_value(true));
+        app::arg(clap::Arg::new("email::reply-to").long("email-reply-to").takes_value(true));
+
         EmailPlugin {
             monitor: None,
         }
@@ -31,7 +35,7 @@ impl Plugin for EmailPlugin {
     }
 
     fn startup(&mut self) {
-        let monitor = Arc::clone(self.monitor.as_ref().unwrap());
+        let monitor = self.monitor.take().unwrap();
         let app = app::quit_handle().unwrap();
         Self::recv(monitor, app);
     }
@@ -40,19 +44,17 @@ impl Plugin for EmailPlugin {
 }
 
 impl EmailPlugin {
-    fn recv(monitor: SubscribeHandle, app: QuitHandle) {
-        tokio::spawn(async move {
-            if let Some(mut mon_lock) = monitor.try_lock() {
-                if let Ok(msg) = mon_lock.try_recv() {
-                    let parsed_msg = msg.as_object().unwrap();
+    fn recv(mut monitor: channel::Receiver, app: QuitHandle) {
+        app::spawn(async move {
+            if let Ok(msg) = monitor.try_recv() {
+                let parsed_msg = msg.as_object().unwrap();
 
-                    let to = get_str(parsed_msg, "to").unwrap();
-                    let subject = get_str(parsed_msg, "subject").unwrap();
-                    let body = get_str(parsed_msg, "body").unwrap();
+                let to = get_str(parsed_msg, "to").unwrap();
+                let subject = get_str(parsed_msg, "subject").unwrap();
+                let body = get_str(parsed_msg, "body").unwrap();
 
-                    if let Err(result) = Self::send(to, subject, body) {
-                        println!("{}", result);
-                    }
+                if let Err(result) = Self::send(to, subject, body) {
+                    println!("{}", result);
                 }
             }
             if !app.is_quiting() {
@@ -62,12 +64,12 @@ impl EmailPlugin {
     }
 
     pub fn send(to: &str, subject: &str, body: &str) -> Result<(), ExpectedError> {
-        let smtp_username = libs::environment::string("SMTP_USERNAME")?;
-        let smtp_password = libs::environment::string("SMTP_PASSWORD")?;
+        let smtp_username = libs::opts::string("email::smtp-username")?;
+        let smtp_password = libs::opts::string("email::smtp-password")?;
         let credentials = Credentials::new(smtp_username, smtp_password);
-        let smtp_relay = libs::environment::string("SMTP_RELAY")?;
-        let from = libs::environment::string("EMAIL_FROM")?;
-        let reply_to = libs::environment::string("EMAIL_REPLY_TO")?;
+        let smtp_relay = libs::opts::string("email::smtp-relay")?;
+        let from = libs::opts::string("email::from")?;
+        let reply_to = libs::opts::string("email::reply-to")?;
 
         let email = Message::builder()
             .from(from.as_str().parse().unwrap())

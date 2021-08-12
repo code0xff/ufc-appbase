@@ -11,15 +11,17 @@ use crate::libs::serde::{get_object, get_str};
 
 pub struct MongoPlugin {
     db: Option<Database>,
-    monitor: Option<SubscribeHandle>,
+    monitor: Option<channel::Receiver>,
 }
 
-appbase_plugin_requires!(MongoPlugin; );
+plugin::requires!(MongoPlugin; );
 
 message!(MongoMsg; {collection: String}, {document: Value});
 
 impl Plugin for MongoPlugin {
     fn new() -> Self {
+        app::arg(clap::Arg::new("mongo::url").long("mongo-url").takes_value(true));
+
         MongoPlugin {
             db: None,
             monitor: None,
@@ -27,7 +29,7 @@ impl Plugin for MongoPlugin {
     }
 
     fn initialize(&mut self) {
-        let mongo_url = libs::environment::string("MONGO_URL").unwrap();
+        let mongo_url = libs::opts::string("mongo::url").unwrap();
         let mut client_opts = executor::block_on(async { ClientOptions::parse(mongo_url).await }).unwrap();
         client_opts.app_name = Some(String::from("MongoDB"));
         let client = Client::with_options(client_opts).unwrap();
@@ -37,7 +39,7 @@ impl Plugin for MongoPlugin {
 
     fn startup(&mut self) {
         let db = self.db.as_ref().unwrap().clone();
-        let monitor = self.monitor.as_ref().unwrap().clone();
+        let monitor = self.monitor.take().unwrap();
         let app = app::quit_handle().unwrap();
         Self::recv(db, monitor, app);
     }
@@ -46,20 +48,18 @@ impl Plugin for MongoPlugin {
 }
 
 impl MongoPlugin {
-    fn recv(db: Database, monitor: SubscribeHandle, app: QuitHandle) {
-        tokio::spawn(async move {
-            if let Some(mut mon_lock) = monitor.try_lock() {
-                if let Ok(msg) = mon_lock.try_recv() {
-                    let parsed_msg = msg.as_object().unwrap();
-                    let collection_name = get_str(parsed_msg, "collection").unwrap();
-                    let value = get_object(parsed_msg, "document").unwrap();
+    fn recv(db: Database, mut monitor: channel::Receiver, app: QuitHandle) {
+        app::spawn(async move {
+            if let Ok(msg) = monitor.try_recv() {
+                let parsed_msg = msg.as_object().unwrap();
+                let collection_name = get_str(parsed_msg, "collection").unwrap();
+                let value = get_object(parsed_msg, "document").unwrap();
 
-                    let collection = db.collection::<Document>(collection_name);
-                    let document = libs::mongo::get_doc(value);
-                    let result = collection.insert_one(document.clone(), None).await;
-                    if let Err(err) = result {
-                        println!("mongo_error={:?}", err);
-                    }
+                let collection = db.collection::<Document>(collection_name);
+                let document = libs::mongo::get_doc(value);
+                let result = collection.insert_one(document.clone(), None).await;
+                if let Err(err) = result {
+                    println!("mongo_error={:?}", err);
                 }
             }
             if !app.is_quiting() {

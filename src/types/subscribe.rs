@@ -16,6 +16,7 @@ pub struct SubscribeEvent {
     pub curr_height: u64,
     pub nodes: Vec<String>,
     pub node_idx: u16,
+    pub filter: String,
     pub status: SubscribeStatus,
 }
 
@@ -24,6 +25,11 @@ impl SubscribeEvent {
         let sub_id = get_string(params, "sub_id").unwrap();
         let start_height = get_u64(params, "start_height").unwrap();
         let target = get_str(params, "target").unwrap();
+        let filter_result = get_string(params, "filter");
+        let filter = match filter_result {
+            Ok(filter) => filter,
+            Err(_) => String::from("")
+        };
         SubscribeEvent {
             task_id: format!("task:{}:{}:{}", chain, target, sub_id),
             target: SubscribeTarget::find(target).unwrap(),
@@ -33,6 +39,7 @@ impl SubscribeEvent {
             curr_height: start_height,
             nodes: get_string_vec(params, "nodes"),
             node_idx: 0,
+            filter,
             status: SubscribeStatus::Working,
         }
     }
@@ -46,7 +53,8 @@ impl SubscribeEvent {
             start_height: get_u64(params, "start_height").unwrap(),
             curr_height: get_u64(params, "curr_height").unwrap(),
             nodes: get_string_vec(params, "nodes"),
-            node_idx: 0,
+            node_idx: get_u64(params, "node_idx").unwrap() as u16,
+            filter: get_string(params, "filter").unwrap(),
             status: SubscribeStatus::find(get_str(params, "status").unwrap()).unwrap(),
         }
     }
@@ -83,21 +91,25 @@ pub struct SubscribeTask {
     pub start_height: u64,
     pub curr_height: u64,
     pub nodes: Vec<String>,
+    pub node_idx: u16,
+    pub filter: String,
     pub status: String,
     pub err_msg: String,
 }
 
 impl SubscribeTask {
-    pub fn from(sub_block: &SubscribeEvent, err_msg: String) -> Self {
+    pub fn from(sub_event: &SubscribeEvent, err_msg: String) -> Self {
         SubscribeTask {
-            task_id: sub_block.task_id.clone(),
-            target: sub_block.target.value(),
-            chain: sub_block.chain.clone(),
-            sub_id: sub_block.sub_id.clone(),
-            start_height: sub_block.start_height,
-            curr_height: sub_block.curr_height,
-            nodes: sub_block.nodes.clone(),
-            status: sub_block.status.value(),
+            task_id: sub_event.task_id.clone(),
+            target: sub_event.target.value(),
+            chain: sub_event.chain.clone(),
+            sub_id: sub_event.sub_id.clone(),
+            start_height: sub_event.start_height,
+            curr_height: sub_event.curr_height,
+            nodes: sub_event.nodes.clone(),
+            node_idx: sub_event.node_idx,
+            filter: sub_event.filter.clone(),
+            status: sub_event.status.value(),
             err_msg,
         }
     }
@@ -108,12 +120,12 @@ impl SubscribeTask {
 }
 
 enumeration!(SubscribeTarget; {Block: "block"}, {Tx: "tx"});
-enumeration!(SubscribeStatus; {Working: "working"}, {Error: "error"});
+enumeration!(SubscribeStatus; {Working: "working"}, {Stopped: "stopped"}, {Error: "error"});
 
 #[cfg(test)]
 mod subscribe_test {
     use appbase::*;
-    use serde_json::{json, Map};
+    use serde_json::{json, Map, Value};
 
     use crate::types::subscribe::{SubscribeEvent, SubscribeStatus};
 
@@ -124,6 +136,7 @@ mod subscribe_test {
         params.insert(String::from("start_height"), json!(1u64));
         params.insert(String::from("target"), json!("block"));
         params.insert(String::from("nodes"), json!(["https://api.cosmos.network"]));
+        params.insert(String::from("filter"), Value::String(String::from("")));
 
         let subscribe_event = SubscribeEvent::new("tendermint", &params);
         assert_eq!(subscribe_event.task_id, "task:tendermint:block:cosmoshub-4");
@@ -136,6 +149,7 @@ mod subscribe_test {
         params.insert(String::from("start_height"), json!(1u64));
         params.insert(String::from("target"), json!("block"));
         params.insert(String::from("nodes"), json!(["https://api.cosmos.network"]));
+        params.insert(String::from("filter"), Value::String(String::from("")));
 
         let subscribe_event = SubscribeEvent::new("tendermint", &params);
         assert!(subscribe_event.is_workable());
@@ -148,40 +162,9 @@ mod subscribe_test {
         params.insert(String::from("start_height"), json!(1u64));
         params.insert(String::from("target"), json!("block"));
         params.insert(String::from("nodes"), json!(["https://api.cosmos.network"]));
+        params.insert(String::from("filter"), Value::String(String::from("")));
 
         let subscribe_event = SubscribeEvent::new("tendermint", &params);
         assert_eq!(subscribe_event.event_id(), "tendermint:block:cosmoshub-4:1");
-    }
-
-    #[test]
-    fn subscribe_event_handle_err_fallback_test() {
-        let mut params = Map::new();
-        params.insert(String::from("sub_id"), json!("cosmoshub-4"));
-        params.insert(String::from("start_height"), json!(1u64));
-        params.insert(String::from("target"), json!("block"));
-        params.insert(String::from("nodes"), json!(["https://api.cosmos.network", "https://api.cosmos2.network"]));
-
-        let rocks_channel = app::get_channel(String::from("rocks"));
-
-        let mut subscribe_event = SubscribeEvent::new("tendermint", &params);
-        subscribe_event.handle_err(String::from("error_test"));
-
-        assert_eq!(subscribe_event.node_idx, 1);
-    }
-
-    #[test]
-    fn subscribe_event_handle_err_test() {
-        let mut params = Map::new();
-        params.insert(String::from("sub_id"), json!("cosmoshub-4"));
-        params.insert(String::from("start_height"), json!(1u64));
-        params.insert(String::from("target"), json!("block"));
-        params.insert(String::from("nodes"), json!(["https://api.cosmos.network"]));
-
-        let rocks_channel = app::get_channel(String::from("rocks"));
-
-        let mut subscribe_event = SubscribeEvent::new("tendermint", &params);
-        subscribe_event.handle_err(String::from("error_test"));
-
-        assert_eq!(SubscribeStatus::Error, subscribe_event.status);
     }
 }

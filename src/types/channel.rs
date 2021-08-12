@@ -1,10 +1,9 @@
 use std::collections::HashMap;
-use appbase::{ChannelHandle, app};
-use std::sync::Arc;
+use appbase::{channel, app};
 
 #[derive(Clone)]
 pub struct MultiChannel {
-    channel_map: HashMap<String, ChannelHandle>,
+    channel_map: HashMap<String, channel::Sender>,
 }
 
 impl MultiChannel {
@@ -22,7 +21,7 @@ impl MultiChannel {
     //     self.channel_map.insert(name.clone(), app::get_channel(name.clone()));
     // }
 
-    pub fn get(&self, name: &str) -> ChannelHandle {
-        Arc::clone(self.channel_map.get(name).unwrap())
+    pub fn get(&self, name: &str) -> channel::Sender {
+        self.channel_map.get(name).unwrap().clone()
     }
 }
