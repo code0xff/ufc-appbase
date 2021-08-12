@@ -93,14 +93,14 @@ pub fn get_array<'a>(params: &'a Map<String, Value>, name: &'a str) -> Result<&'
     }
 }
 
-pub fn get_bool(params: &Map<String, Value>, name: &str) -> Result<bool, ExpectedError> {
-    let unwrapped = unwrap(params, name)?;
-    let opt_val = unwrapped.as_bool();
-    match opt_val {
-        None => Err(ExpectedError::TypeError(format!("{} is not {}!", name, "bool"))),
-        Some(val) => Ok(val),
-    }
-}
+// pub fn get_bool(params: &Map<String, Value>, name: &str) -> Result<bool, ExpectedError> {
+//     let unwrapped = unwrap(params, name)?;
+//     let opt_val = unwrapped.as_bool();
+//     match opt_val {
+//         None => Err(ExpectedError::TypeError(format!("{} is not {}!", name, "bool"))),
+//         Some(val) => Ok(val),
+//     }
+// }
 
 pub fn get_value_by_path<'a>(params: &'a Map<String, Value>, path: &'a str) -> Result<&'a Value, ExpectedError> {
     let split = path.split(".");
