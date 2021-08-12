@@ -16,6 +16,7 @@ pub struct SubscribeEvent {
     pub curr_height: u64,
     pub nodes: Vec<String>,
     pub node_idx: u16,
+    pub filter: String,
     pub status: SubscribeStatus,
 }
 
@@ -24,6 +25,11 @@ impl SubscribeEvent {
         let sub_id = get_string(params, "sub_id").unwrap();
         let start_height = get_u64(params, "start_height").unwrap();
         let target = get_str(params, "target").unwrap();
+        let filter_result = get_string(params, "filter");
+        let filter = match filter_result {
+            Ok(filter) => filter,
+            Err(_) => String::from("")
+        };
         SubscribeEvent {
             task_id: format!("task:{}:{}:{}", chain, target, sub_id),
             target: SubscribeTarget::find(target).unwrap(),
@@ -33,6 +39,7 @@ impl SubscribeEvent {
             curr_height: start_height,
             nodes: get_string_vec(params, "nodes"),
             node_idx: 0,
+            filter,
             status: SubscribeStatus::Working,
         }
     }
@@ -47,6 +54,7 @@ impl SubscribeEvent {
             curr_height: get_u64(params, "curr_height").unwrap(),
             nodes: get_string_vec(params, "nodes"),
             node_idx: get_u64(params, "node_idx").unwrap() as u16,
+            filter: get_string(params, "filter").unwrap(),
             status: SubscribeStatus::find(get_str(params, "status").unwrap()).unwrap(),
         }
     }
@@ -84,6 +92,7 @@ pub struct SubscribeTask {
     pub curr_height: u64,
     pub nodes: Vec<String>,
     pub node_idx: u16,
+    pub filter: String,
     pub status: String,
     pub err_msg: String,
 }
@@ -99,6 +108,7 @@ impl SubscribeTask {
             curr_height: sub_event.curr_height,
             nodes: sub_event.nodes.clone(),
             node_idx: sub_event.node_idx,
+            filter: sub_event.filter.clone(),
             status: sub_event.status.value(),
             err_msg,
         }
@@ -115,7 +125,7 @@ enumeration!(SubscribeStatus; {Working: "working"}, {Stopped: "stopped"}, {Error
 #[cfg(test)]
 mod subscribe_test {
     use appbase::*;
-    use serde_json::{json, Map};
+    use serde_json::{json, Map, Value};
 
     use crate::types::subscribe::{SubscribeEvent, SubscribeStatus};
 
@@ -126,6 +136,7 @@ mod subscribe_test {
         params.insert(String::from("start_height"), json!(1u64));
         params.insert(String::from("target"), json!("block"));
         params.insert(String::from("nodes"), json!(["https://api.cosmos.network"]));
+        params.insert(String::from("filter"), Value::String(String::from("")));
 
         let subscribe_event = SubscribeEvent::new("tendermint", &params);
         assert_eq!(subscribe_event.task_id, "task:tendermint:block:cosmoshub-4");
@@ -138,6 +149,7 @@ mod subscribe_test {
         params.insert(String::from("start_height"), json!(1u64));
         params.insert(String::from("target"), json!("block"));
         params.insert(String::from("nodes"), json!(["https://api.cosmos.network"]));
+        params.insert(String::from("filter"), Value::String(String::from("")));
 
         let subscribe_event = SubscribeEvent::new("tendermint", &params);
         assert!(subscribe_event.is_workable());
@@ -150,6 +162,7 @@ mod subscribe_test {
         params.insert(String::from("start_height"), json!(1u64));
         params.insert(String::from("target"), json!("block"));
         params.insert(String::from("nodes"), json!(["https://api.cosmos.network"]));
+        params.insert(String::from("filter"), Value::String(String::from("")));
 
         let subscribe_event = SubscribeEvent::new("tendermint", &params);
         assert_eq!(subscribe_event.event_id(), "tendermint:block:cosmoshub-4:1");
