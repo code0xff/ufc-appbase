@@ -99,6 +99,26 @@
         "type": "text",
         "nullable": true
       },
+      "from_address": {
+        "type": "varchar",
+        "size": 100,
+        "nullable": true
+      },
+      "to_address": {
+        "type": "varchar",
+        "size": 100,
+        "nullable": true
+      },
+      "delegator_address": {
+        "type": "varchar",
+        "size": 100,
+        "nullable": true
+      },
+      "validator_address": {
+        "type": "varchar",
+        "size": 100,
+        "nullable": true
+      },
       "raw_log": {
         "type": "text",
         "nullable": true

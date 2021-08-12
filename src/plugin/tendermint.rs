@@ -15,7 +15,7 @@ use crate::error::error::ExpectedError;
 use crate::libs::mysql::get_params;
 use crate::libs::request;
 use crate::libs::rocks::{get_by_prefix_static, get_static};
-use crate::libs::serde::{get_array, get_object, get_str, get_str_by_path, get_string, select_value};
+use crate::libs::serde::{get_array, get_object, get_str, get_value_by_path, get_string, select_value};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::plugin::mongo::{MongoMsg, MongoPlugin};
 use crate::plugin::mysql::{MySqlMsg, MySqlPlugin};
@@ -169,6 +169,16 @@ impl Plugin for TendermintPlugin {
                                             }
                                         };
                                         let header = block.get("header").unwrap();
+                                        let header_object = header.as_object().unwrap();
+
+                                        let filtered_result = libs::serde::filter(header_object, sub_event.filter.clone());
+                                        if filtered_result.is_err() {
+                                            let err = filtered_result.unwrap_err();
+                                            Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                            continue;
+                                        } else if filtered_result.is_ok() && !filtered_result.unwrap() {
+                                            continue;
+                                        }
 
                                         println!("event_id={}, header={}", sub_event.event_id(), header.to_string());
 
@@ -207,9 +217,9 @@ impl Plugin for TendermintPlugin {
                                 let response = request::get(latest_req_url.as_ref());
                                 match response {
                                     Ok(body) => {
-                                        let height_result = get_str_by_path(&body, "block>header>height");
+                                        let height_result = get_value_by_path(&body, "block.header.height");
                                         let latest_height = match height_result {
-                                            Ok(height) => u64::from_str(height).unwrap(),
+                                            Ok(height) => u64::from_str(height.as_str().unwrap()).unwrap(),
                                             Err(err) => {
                                                 Self::error_handler(&rocks_channel, sub_event, err.to_string());
                                                 continue;
@@ -233,13 +243,23 @@ impl Plugin for TendermintPlugin {
                                                     }
                                                 };
                                                 for tx in txs.iter() {
+                                                    let tx_object = tx.as_object().unwrap();
+                                                    let filtered_result = libs::serde::filter(tx_object, sub_event.filter.clone());
+                                                    if filtered_result.is_err() {
+                                                        let err = filtered_result.unwrap_err();
+                                                        Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                                        continue;
+                                                    } else if filtered_result.is_ok() && !filtered_result.unwrap() {
+                                                        continue;
+                                                    }
+
                                                     println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
 
                                                     if tm_tx_mysql_sync {
                                                         if let Err(err) = Self::mysql_send(
                                                             &mysql_channel,
                                                             schema.get("tm_tx").unwrap().clone(),
-                                                            tx.as_object().unwrap(),
+                                                            tx_object,
                                                         ) {
                                                             println!("{}", err);
                                                         }

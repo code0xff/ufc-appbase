@@ -12,6 +12,16 @@ pub fn verify(params: &Map<String, Value>) -> Result<(), ExpectedError> {
         ("start_height", "u64"),
         ("nodes", "array"),
     ])?;
+    let filter = params.get("filter");
+    if filter.is_some() {
+        if !filter.unwrap().is_string() {
+            return Err(ExpectedError::TypeError(String::from("filter is not string!")));
+        }
+        let filter_str = filter.unwrap().as_str().unwrap().trim();
+        if !filter_str.is_empty() && (!filter_str.contains("=")) {
+            return Err(ExpectedError::InvalidError(String::from("filter format is invalid! example='key1=val1&key2=val2|key3=val3' or 'key1.key2=val1'")));
+        }
+    }
     if !SubscribeTarget::valid(params.get("target").unwrap().as_str().unwrap()) {
         return Err(ExpectedError::TypeError(String::from("matched target does not exist! target=[block, tx]")));
     }
