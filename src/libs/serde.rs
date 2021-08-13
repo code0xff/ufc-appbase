@@ -159,7 +159,7 @@ pub fn filter(values: &Map<String, Value>, filter: String) -> Result<bool, Expec
     for c in filter_chars {
         if c == '&' || c == '|' || c == '(' || c == ')' {
             if !key_value.trim().is_empty() {
-                let calc_result = filter_calc(values, &key_value)?;
+                let calc_result = filter_value(values, &key_value)?;
                 calc_vec.push(calc_result.to_string());
             }
             calc_vec.push(String::from(c));
@@ -169,7 +169,7 @@ pub fn filter(values: &Map<String, Value>, filter: String) -> Result<bool, Expec
         }
     }
     if !key_value.is_empty() {
-        let calc_result = filter_calc(values, &key_value)?;
+        let calc_result = filter_value(values, &key_value)?;
         calc_vec.push(calc_result.to_string());
     }
 
@@ -178,14 +178,11 @@ pub fn filter(values: &Map<String, Value>, filter: String) -> Result<bool, Expec
     for vec_item in calc_vec {
         if vec_item == ")" {
             while opt_ref_to_result(calc_stack.last())? != "(" {
-                let top = opt_to_result(bool_stack.pop())?;
-                let second = opt_to_result(bool_stack.pop())?;
-                let calc_op = opt_to_result(calc_stack.pop())?;
-                if calc_op == "&" {
-                    bool_stack.push(top & second);
-                } else {
-                    bool_stack.push(top | second);
+                if bool_stack.len() < 2 {
+                    return Err(ExpectedError::InvalidError(String::from("filter format error!")));
                 }
+                let calc_ret = filter_calc(&mut bool_stack, &mut calc_stack)?;
+                bool_stack.push(calc_ret);
             }
             calc_stack.pop();
         } else {
@@ -196,14 +193,18 @@ pub fn filter(values: &Map<String, Value>, filter: String) -> Result<bool, Expec
             }
         }
     }
+    while !calc_stack.is_empty() {
+        let calc_ret = filter_calc(&mut bool_stack, &mut calc_stack)?;
+        bool_stack.push(calc_ret);
+    }
     let ret = opt_to_result(bool_stack.pop())?;
     Ok(ret)
 }
 
-fn filter_calc(values: &Map<String, Value>, key_value: &String) -> Result<bool, ExpectedError> {
+fn filter_value(values: &Map<String, Value>, key_value: &String) -> Result<bool, ExpectedError> {
     let mut split_kv = key_value.split("=");
-    if split_kv.clone().count() < 2 {
-        return Err(ExpectedError::TypeError(String::from("filter condition must contain '='!")));
+    if split_kv.clone().count() != 2 {
+        return Err(ExpectedError::TypeError(String::from("invalid filter condition format! example='key=val'")));
     }
     let key = split_kv.next().unwrap().trim();
     let value = split_kv.next().unwrap().trim();
@@ -222,6 +223,17 @@ fn filter_calc(values: &Map<String, Value>, key_value: &String) -> Result<bool, 
     Ok(value == found_val.as_str())
 }
 
+fn filter_calc(bool_stack: &mut Vec<bool>, calc_stack: &mut Vec<String>) -> Result<bool, ExpectedError> {
+    let calc_op = opt_to_result(calc_stack.pop())?;
+    let top = opt_to_result(bool_stack.pop())?;
+    let second = opt_to_result(bool_stack.pop())?;
+    if calc_op == "&" {
+        Ok(top & second)
+    } else {
+        Ok(top | second)
+    }
+}
+
 #[cfg(test)]
 mod serde {
     use serde_json::{json, Map, Value};
@@ -235,7 +247,7 @@ mod serde {
         test_map.insert(String::from("key2"), json!({"sub_key1": "sub_val1"}));
         test_map.insert(String::from("key3"), json!(100));
 
-        let ret = serde::filter(&test_map, String::from("key1 = val1 & sub_key1 = sub_val1 & key3 =101 | key4=null")).unwrap();
+        let ret = serde::filter(&test_map, String::from("(key1 = val1 & sub_key1 = sub_val1 & key3 =101) | key4=null | key3=101")).unwrap();
         assert_eq!(ret, true);
     }
 
