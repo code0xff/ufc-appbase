@@ -168,7 +168,7 @@ pub fn filter(values: &Map<String, Value>, filter: String) -> Result<bool, Expec
             key_value.push(c);
         }
     }
-    if !key_value.is_empty() {
+    if !key_value.trim().is_empty() {
         let calc_result = filter_value(values, &key_value)?;
         calc_vec.push(calc_result.to_string());
     }
