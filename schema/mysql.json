@@ -2,64 +2,85 @@
   "tm_block": {
     "attributes": {
       "chain_id": {
-        "type": "varchar",
-        "size": 100,
-        "nullable": true
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
       },
       "height": {
-        "type": "varchar",
-        "size": 100,
-        "nullable": false
+        "type": "string",
+        "maxLength": 100
       },
       "time": {
-        "type": "varchar",
-        "size": 100,
-        "nullable": true
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
       },
       "last_commit_hash": {
-        "type": "varchar",
-        "size": 100,
-        "nullable": true
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
       },
       "data_hash": {
-        "type": "varchar",
-        "size": 100,
-        "nullable": true
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
       },
       "validators_hash": {
-        "type": "varchar",
-        "size": 100,
-        "nullable": true
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
       },
       "next_validators_hash": {
-        "type": "varchar",
-        "size": 100,
-        "nullable": true
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
       },
       "consensus_hash": {
-        "type": "varchar",
-        "size": 100,
-        "nullable": true
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
       },
       "app_hash": {
-        "type": "varchar",
-        "size": 100,
-        "nullable": true
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
       },
       "last_results_hash": {
-        "type": "varchar",
-        "size": 100,
-        "nullable": true
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
       },
       "evidence_hash": {
-        "type": "varchar",
-        "size": 100,
-        "nullable": true
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
       },
       "proposer_address": {
-        "type": "varchar",
-        "size": 100,
-        "nullable": true
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
       }
     },
     "indexes": [
@@ -76,57 +97,66 @@
   "tm_tx": {
     "attributes": {
       "txhash": {
-        "type": "varchar",
-        "size": 100,
-        "nullable": false
+        "type": "string",
+        "maxLength": 100
       },
       "height": {
-        "type": "varchar",
-        "size": 100,
-        "nullable": false
+        "type": "string",
+        "maxLength": 100
       },
       "gas_wanted": {
-        "type": "varchar",
-        "size": 100,
-        "nullable": false
+        "type": "string",
+        "maxLength": 100
       },
       "gas_used": {
-        "type": "varchar",
-        "size": 100,
-        "nullable": false
+        "type": "string",
+        "maxLength": 100
       },
       "fee": {
-        "type": "text",
-        "nullable": true
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 65536
       },
       "from_address": {
-        "type": "varchar",
-        "size": 100,
-        "nullable": true
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
       },
       "to_address": {
-        "type": "varchar",
-        "size": 100,
-        "nullable": true
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
       },
       "delegator_address": {
-        "type": "varchar",
-        "size": 100,
-        "nullable": true
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
       },
       "validator_address": {
-        "type": "varchar",
-        "size": 100,
-        "nullable": true
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
       },
       "raw_log": {
-        "type": "text",
-        "nullable": true
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 65536
       },
       "timestamp": {
-        "type": "varchar",
-        "size": 100,
-        "nullable": false
+        "type": "string",
+        "maxLength": 100
       }
     },
     "indexes": [
@@ -135,6 +165,18 @@
       ],
       [
         "height"
+      ],
+      [
+        "from_address"
+      ],
+      [
+        "to_address"
+      ],
+      [
+        "delegator_address"
+      ],
+      [
+        "validator_address"
       ]
     ],
     "uniques": [

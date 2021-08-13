@@ -4,7 +4,8 @@ use jsonrpc_core::Value;
 
 use crate::enumeration;
 use crate::error::error::ExpectedError;
-use crate::libs::serde::{get_array, get_bool, get_object, get_string};
+use crate::libs::mysql::convert_type;
+use crate::libs::serde::{get_array, get_object};
 use crate::types::enumeration::Enumeration;
 
 #[derive(Clone, Debug)]
@@ -19,7 +20,7 @@ pub struct Schema {
 pub struct Attribute {
     pub name: String,
     _type: String,
-    size: Option<u32>,
+    max_length: Option<u32>,
     nullable: bool,
 }
 
@@ -31,19 +32,40 @@ impl Schema {
         let map = values.as_object().unwrap();
         let raw_attributes = get_object(map, "attributes")?;
 
-        let attributes = raw_attributes.iter().map(|(key, value)| {
+        let mut attributes: Vec<Attribute> = Vec::new();
+        for (key, value) in raw_attributes {
             let parsed_value = value.as_object().unwrap();
-            let size = match parsed_value.get("size") {
+            let size = match parsed_value.get("maxLength") {
                 None => None,
                 Some(size) => Some(size.as_u64().unwrap() as u32)
             };
-            Attribute {
+            let type_value = match parsed_value.get("type") {
+                None => return Err(ExpectedError::NoneError(String::from("mysql schema attribute must include type!"))),
+                Some(type_value) => type_value
+            };
+            let (_type, nullable) = match type_value {
+                Value::Array(v) => {
+                    let v_str: Vec<String> = v.iter().map(|it| { String::from(it.as_str().unwrap()) }).collect();
+                    if v_str.len() > 2 {
+                        return Err(ExpectedError::InvalidError(String::from("type array size cannot be bigger than 2!")));
+                    }
+                    if v_str.len() > 1 && v_str.get(1).unwrap() != "null" {
+                        return Err(ExpectedError::InvalidError(String::from("second value of types must be null!")));
+                    }
+                    (v_str.get(0).unwrap().clone(), true)
+                }
+                Value::String(v) => (v.clone(), false),
+                _ => return Err(ExpectedError::TypeError(String::from("type only can be string or array!")))
+            };
+
+            let attribute = Attribute {
                 name: key.clone(),
-                _type: get_string(parsed_value, "type").unwrap(),
-                size,
-                nullable: get_bool(parsed_value, "nullable").unwrap(),
-            }
-        }).collect();
+                _type,
+                max_length: size,
+                nullable,
+            };
+            attributes.push(attribute);
+        }
 
         let uniques = get_array(map, "uniques")?;
         let indexes = get_array(map, "indexes")?;
@@ -63,12 +85,13 @@ impl Schema {
         let mut query_line: Vec<String> = Vec::new();
         query_line.push(format!("`{}_id` bigint(20) not null auto_increment", table));
         for attribute in attributes.iter() {
-            match attribute.size {
+            let converted_type = convert_type(attribute._type.clone(), attribute.max_length).unwrap();
+            match attribute.max_length {
                 None => {
-                    query_line.push(format!("`{}` {} {}", attribute.name, attribute._type, Self::nullable(attribute.nullable)));
+                    query_line.push(format!("`{}` {} {}", attribute.name, converted_type, Self::get_null_or_not(attribute.nullable)));
                 }
                 Some(size) => {
-                    query_line.push(format!("`{}` {}({}) {}", attribute.name, attribute._type, size, Self::nullable(attribute.nullable)));
+                    query_line.push(format!("`{}` {}({}) {}", attribute.name, converted_type, size, Self::get_null_or_not(attribute.nullable)));
                 }
             }
         }
@@ -101,7 +124,7 @@ impl Schema {
         format!("insert into {} ({}) values ({})", table, column_str, values)
     }
 
-    fn nullable(nullable: bool) -> String {
+    fn get_null_or_not(nullable: bool) -> String {
         if nullable {
             String::from("null")
         } else {

@@ -1,6 +1,9 @@
+use std::str::FromStr;
+
 use serde_json::{Map, Value};
 
 use crate::error::error::ExpectedError;
+use crate::libs::opts::{opt_ref_to_result, opt_to_result};
 
 pub fn select_value(params: &Map<String, Value>, names: Vec<&str>) -> Result<Map<String, Value>, ExpectedError> {
     let mut values = Map::new();
@@ -93,14 +96,14 @@ pub fn get_array<'a>(params: &'a Map<String, Value>, name: &'a str) -> Result<&'
     }
 }
 
-pub fn get_bool(params: &Map<String, Value>, name: &str) -> Result<bool, ExpectedError> {
-    let unwrapped = unwrap(params, name)?;
-    let opt_val = unwrapped.as_bool();
-    match opt_val {
-        None => Err(ExpectedError::TypeError(format!("{} is not {}!", name, "bool"))),
-        Some(val) => Ok(val),
-    }
-}
+// pub fn get_bool(params: &Map<String, Value>, name: &str) -> Result<bool, ExpectedError> {
+//     let unwrapped = unwrap(params, name)?;
+//     let opt_val = unwrapped.as_bool();
+//     match opt_val {
+//         None => Err(ExpectedError::TypeError(format!("{} is not {}!", name, "bool"))),
+//         Some(val) => Ok(val),
+//     }
+// }
 
 pub fn get_value_by_path<'a>(params: &'a Map<String, Value>, path: &'a str) -> Result<&'a Value, ExpectedError> {
     let split = path.split(".");
@@ -154,33 +157,46 @@ pub fn filter(values: &Map<String, Value>, filter: String) -> Result<bool, Expec
     let mut key_value = String::new();
     let filter_chars = filter.chars();
     for c in filter_chars {
-        if c == '&' || c == '|' {
-            calc_vec.push(key_value.clone());
+        if c == '&' || c == '|' || c == '(' || c == ')' {
+            if !key_value.trim().is_empty() {
+                let calc_result = filter_calc(values, &key_value)?;
+                calc_vec.push(calc_result.to_string());
+            }
             calc_vec.push(String::from(c));
             key_value = String::new();
         } else {
             key_value.push(c);
         }
     }
-    calc_vec.push(key_value.clone());
+    if !key_value.is_empty() {
+        let calc_result = filter_calc(values, &key_value)?;
+        calc_vec.push(calc_result.to_string());
+    }
 
-    let mut ret = filter_calc(values, calc_vec.first().unwrap())?;
-    let mut calc_iter = calc_vec.iter().skip(1);
-    while let Some(and_or) = calc_iter.next() {
-        match calc_iter.next() {
-            None => {
-                return Err(ExpectedError::NoneError(String::from("the size of filter condition is not insufficient!")));
-            }
-            Some(key_value) => {
-                let value = filter_calc(values, key_value)?;
-                if and_or == "&" {
-                    ret &= value;
+    let mut bool_stack: Vec<bool> = Vec::new();
+    let mut calc_stack: Vec<String> = Vec::new();
+    for vec_item in calc_vec {
+        if vec_item == ")" {
+            while opt_ref_to_result(calc_stack.last())? != "(" {
+                let top = opt_to_result(bool_stack.pop())?;
+                let second = opt_to_result(bool_stack.pop())?;
+                let calc_op = opt_to_result(calc_stack.pop())?;
+                if calc_op == "&" {
+                    bool_stack.push(top & second);
                 } else {
-                    ret |= value;
+                    bool_stack.push(top | second);
                 }
             }
-        };
+            calc_stack.pop();
+        } else {
+            if vec_item == "(" || vec_item == "&" || vec_item == "|" {
+                calc_stack.push(vec_item.clone());
+            } else {
+                bool_stack.push(bool::from_str(vec_item.as_str()).unwrap());
+            }
+        }
     }
+    let ret = opt_to_result(bool_stack.pop())?;
     Ok(ret)
 }
 
@@ -231,7 +247,7 @@ mod serde {
         test_map.insert(String::from("key3"), json!(100));
         test_map.insert(String::from("key4"), Value::String(String::from("not_null")));
 
-        let ret = serde::filter(&test_map, String::from("key1 = val1 & sub_key1 = sub_val1 & key3 =100 & key4=null")).unwrap();
+        let ret = serde::filter(&test_map, String::from("(key1 = val1 & sub_key1 = sub_val1 & key3 =100) & key4=null")).unwrap();
         assert_eq!(ret, false);
     }
 }
