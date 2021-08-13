@@ -6,6 +6,8 @@ use crate::types::enumeration::Enumeration;
 use crate::types::mysql::Order;
 use crate::validation::verify::verify_default;
 
+const HEIGHT_RANGE: u64 = 50;
+
 pub fn verify(params: &Map<String, Value>) -> Result<(), ExpectedError> {
     if params.get("txhash").is_some() {
         return if params.get("txhash").unwrap().as_str().is_some() {
@@ -23,8 +25,8 @@ pub fn verify(params: &Map<String, Value>) -> Result<(), ExpectedError> {
         if to_height < from_height {
             return Err(ExpectedError::InvalidError(format!("to_height must be bigger than from_height! from_height={}, to_height={}", from_height, to_height)));
         }
-        if to_height - from_height >= 30 {
-            return Err(ExpectedError::InvalidError(format!("height range must be smaller than 30! input_range={}", to_height - from_height)));
+        if to_height - from_height >= HEIGHT_RANGE {
+            return Err(ExpectedError::InvalidError(format!("height range must be smaller than {}! input_range={}", HEIGHT_RANGE, to_height - from_height)));
         }
     }
     Ok(())
