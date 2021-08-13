@@ -1,104 +1,391 @@
 use std::collections::HashMap;
+use std::fs;
+use std::str::FromStr;
 use std::sync::Arc;
-use std::thread;
-use std::time::Duration;
 
 use appbase::*;
+use appbase::plugin::State;
 use futures::lock::Mutex as FutureMutex;
-use jsonrpc_core::*;
+use jsonrpc_core::Params;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-
-/*
- * Plugin typename MUST be unique.
- */
-
+use crate::{enumeration, libs, message};
+use crate::error::error::ExpectedError;
+use crate::libs::mysql::get_params;
+use crate::libs::request;
+use crate::libs::rocks::{get_by_prefix_static, get_static};
+use crate::libs::serde::{get_array, get_object, get_str, get_value_by_path, get_string, select_value};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
-use crate::plugin::rocks::{RocksMethod, RocksMsg, RocksPlugin};
-use crate::types::block::{BlockTask, SubscribeBlock, SubscribeStatus};
-use crate::validation::{subscribe, unsubscribe};
+use crate::plugin::mongo::{MongoMsg, MongoPlugin};
+use crate::plugin::mysql::{MySqlPlugin,MySqlMsg};
+use crate::plugin::rocks::{RocksPlugin,RocksMethod,RocksMsg};
+use crate::types::channel::MultiChannel;
+use crate::types::enumeration::Enumeration;
+use crate::types::mysql::Schema;
+use crate::types::subscribe::{SubscribeEvent, SubscribeStatus, SubscribeTarget, SubscribeTask};
+use crate::validation::{get_blocks, get_task, get_txs, resubscribe, stop_subscribe, subscribe, unsubscribe};
 
-
-pub struct TemplatePlugin {
-    /*
-     * Plugin SHOULD include `base: PluginBase` as its field.
-     */
-    base: PluginBase,
+pub struct EthereumPlugin {
+    sub_events: Option<SubscribeEvents>,
+    channels: Option<MultiChannel>,
+    monitor: Option<channel::Receiver>,
+    schema: Option<HashMap<String, Schema>>,
+    ether_block_mysql_sync: Option<bool>,
+    ether_tx_mysql_sync: Option<bool>,
+    ether_block_mongo_sync: Option<bool>,
+    ether_tx_mongo_sync: Option<bool>,
+    ether_block_publish: Option<bool>,
+    ether_tx_publish: Option<bool>
 }
 
-/*
- * Plugin SHOULD have `appbase_plugin_requires!` macro including dependencies.
- * (case 1) Plugin A without any dependencies: `appbase_plugin_requires!(A; );`
- * (case 2) Plugin A depends on Plugin B and C: `appbase_plugin_requires!(A; B, C);`
- */
-appbase_plugin_requires!(TemplatePlugin; );
+const CHAIN: &str = "ethereum";
+const TASK_PREFIX: &str = "task:ethereum";
 
-/*
- * Plugin impl MAY have plugin-specific methods.
- */
-impl TemplatePlugin {}
+type SubscribeEvents = Arc<FutureMutex<HashMap<String, SubscribeEvent>>>;
 
-/*
- * Plugin MUST implement `Plugin` trait.
- */
-impl Plugin for TemplatePlugin {
-    /*
-     * Plugin trait impl SHOULD have `appbase_plugin_default!` macro
-     */
-    appbase_plugin_default!(TemplatePlugin);
+message!((EthereumMsg; {value: Value}); (EthereumMethod; {Subscribe: "eth_subscribe"}, {Resubscribe: "resubscribe"}, {Stop: "stop"}, {Unsubscribe: "eth_unsubscribe"}));
 
-    /*
-     * Plugin trait impl MUST implement following methods:
-     *    fn new() -> Self;
-     *    fn typename() -> String;         // automatically added by appbase_plugin_default!
-     *    fn name(&self) -> String;        // automatically added by appbase_plugin_default!
-     *    fn initialize(&mut self);
-     *    fn startup(&mut self);
-     *    fn shutdown(&mut self);
-     *    fn state(&self) -> PluginState;  // automatically added by appbase_plugin_default!
-     */
+plugin::requires!(EthereumPlugin; JsonRpcPlugin, RocksPlugin);
 
-    fn new() -> Self {
-        TemplatePlugin {
-            base: PluginBase::new(),
-            // ... other fields, if exist.
+impl Plugin for EthereumPlugin {
+    fn new() -> Self{
+        app::arg(clap::Arg::new("ethereum::block-mysql-sync").long("ether-block-mysql-sync"));
+        app::arg(clap::Arg::new("ethereum::tx-mysql-sync").long("ether-tx-mysql-sync"));
+        app::arg(clap::Arg::new("ethereum::block-mongo-sync").long("ether-block-mongo-sync"));
+        app::arg(clap::Arg::new("ethereum::tx-mongo-sync").long("ether-tx-mongo-sync"));
+        app::arg(clap::Arg::new("ethereum::block-rabbit-mg-sync").long("ether-block-mysql-sync"));
+        app::arg(clap::Arg::new("ethereum::tx-rabbit-mq-sync").long("ether-tx-rabbit-mq-sync"));
+
+        EthereumPlugin {
+            sub_events : None,
+            channels: None,
+            monitor: None,
+            schema: None,
+            ether_tx_mongo_sync: None,
+            ether_block_mongo_sync: None,
+            ether_block_mysql_sync: None,
+            ether_tx_mysql_sync: None,
+            ether_block_publish: None,
+            ether_tx_publish: None,
         }
     }
 
     fn initialize(&mut self) {
-        /*
-         * `initialize` SHOULD call `plugin_initialize` (automatically added by appbase_plugin_requires!)
-         * in the first part and return at once if it returns `false`.
-         * It is guaranteed that all dependencies are initialized by calling `plugin_initialize`.
-         * Be careful not to make circular dependency.
-         */
-        if !self.plugin_initialize() {
-            return;
-        }
-
-        // ... do remaining steps for initialization
+        self.init();
+        self.register_jsonrpc();
+        self.load_tasks();
     }
 
     fn startup(&mut self) {
-        /*
-         * `startup` SHOULD call `plugin_startup` in the first part.
-         */
-        if !self.plugin_startup() {
-            return;
-        }
+        let mut monitor = self.monitor.take().unwrap();
+        let sub_events = Arc::clone(self.sub_events.as_ref().unwrap());
 
-        // ... do remaining steps for startup
+        let rocks_channel = self.channels.as_ref().unwrap().get("rocks");
+        let mysql_channel = self.channels.as_ref().unwrap().get("mysql");
+        let rabbit_channel = self.channels.as_ref().unwrap().get("rabbit");
+        let mongo_channel = self.channels.as_ref().unwrap().get("mongo");
+
+        let ether_block_mysql_sync = self.ether_block_mysql_sync.unwrap();
+        let ether_tx_mysql_sync = self.ether_tx_mysql_sync.unwrap();
+        let ether_block_mongo_sync = self.ether_block_mongo_sync.unwrap();
+        let ether_tx_mongo_sync = self.ether_tx_mongo_sync.unwrap();
+        let ether_block_publish = self.ether_block_publish.unwrap();
+        let ether_tx_publish = self.ether_tx_publish.unwrap();
+        let app = app::quit_handle().unwrap();
+
+        let schema = self.schema.as_ref().unwrap().clone();
+        app::spawn_blocking(move || {
+            loop {
+                if app.is_quiting(){
+                    break;
+                }
+                let sub_events_try_lock = sub_events.try_lock();
+                if sub_events_try_lock.is_none() {
+                    continue;
+                }
+                let mut sub_events_lock = sub_events_try_lock.unwrap();
+                if let Ok(msg) = monitor.try_recv() {
+                    let parsed_msg = msg.as_object().unwrap();
+                    let method = EthereumMethod::find(get_str(parsed_msg, "method").unwrap()).unwrap();
+                    let params = get_object(parsed_msg, "value").unwrap();
+                    match method {
+                        EthereumMethod::Subscribe => {
+                            let new_event = SubscribeEvent::new(CHAIN, &params);
+                            sub_events_lock.insert(new_event.task_id.clone(), new_event.clone());
+
+                            let task = SubscribeTask::from(&new_event, String::from(""));
+                            let msg = RocksMsg::new(RocksMethod::Put, new_event.task_id, Value::String(json!(task).to_string()));
+                            let _ = rocks_channel.send(msg);
+                        }
+                        EthereumMethod::Unsubscribe => {
+                            let task_id = get_string(&params, "task_id").unwrap();
+                            sub_events_lock.remove(&task_id);
+
+                            let msg = RocksMsg::new(RocksMethod::Delete, task_id, Value::Null);
+                            let _ = rocks_channel.send(msg);
+                        }
+                        EthereumMethod::Resubscribe => {
+                            let task_id = get_str(&params, "task_id").unwrap();
+                            let mut sub_event = sub_events_lock.get(task_id).unwrap().clone();
+                            sub_event.node_idx = 0;
+                            sub_event.status = SubscribeStatus::Working;
+                            sub_events_lock.insert(sub_event.task_id.clone(), sub_event.clone());
+
+                            let task = SubscribeTask::from(&sub_event, String::from(""));
+                            let msg = RocksMsg::new(RocksMethod::Put, sub_event.task_id, Value::String(json!(task).to_string()));
+                            let _ = rocks_channel.send(msg);
+                        }
+                        EthereumMethod::Stop => {
+                            let task_id = get_str(&params, "task_id").unwrap();
+                            let mut sub_event = sub_events_lock.get(task_id).unwrap().clone();
+                            sub_event.status = SubscribeStatus::Stopped;
+                            sub_events_lock.insert(sub_event.task_id.clone(), sub_event.clone());
+
+                            let task = SubscribeTask::from(&sub_event, String::from(""));
+                            let msg = RocksMsg::new(RocksMethod::Put, sub_event.task_id, Value::String(json!(task).to_string()));
+                            let _ = rocks_channel.send(msg);
+                        }
+                    };
+                }
+
+                for(_, sub_event) in sub_events_lock.iter_mut() {
+                    if sub_event.is_workable() {
+                        match sub_event.target {
+                            SubscribeTarget::Block => {
+                                let node_index = usize::from(sub_event.node_idx);
+                                let req_url = format!("{}", sub_event.nodes[node_index]);
+                                let response = request::get(req_url.as_ref());
+
+                                match response {
+                                    Ok(body) => {
+                                        let block_result = get_object(&body, "block");
+                                        let block = match block_result {
+                                            Ok(block) => block,
+                                            Err(err) => {
+                                                println!("{}", err);
+                                                continue;
+                                            }
+                                        };
+                                        let header = block.get("header").unwrap();
+                                        let header_object = header.as_object().unwrap();
+
+                                        let filtered_result = libs::serde::filter(header_object, sub_event.filter.clone());
+                                        if filtered_result.is_err() {
+                                            let err = filtered_result.unwrap_err();
+                                            Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                            continue;
+                                        } else if filtered_result.is_ok() && !filtered_result.unwrap() {
+                                            continue;
+                                        }
+
+                                        println!("event_id={}, header={}", sub_event.event_id(), header.to_string());
+
+                                    }
+                                    Err(err) => {
+                                        if err.to_string().starts_with("requested block height") {
+                                            println!("waiting for next block...");
+                                        } else {
+                                            Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                        }
+                                    }
+                                }
+                            }
+                            SubscribeTarget::Tx => {
+                                let node_idx = usize::from(sub_event.node_idx);
+                                let latest_req_url = format!("{}", sub_event.nodes[node_idx]);
+                                let response = request::get(latest_req_url.as_ref());
+                                match response {
+                                    Ok(body) => {
+                                        let height_result = get_value_by_path(&body, "block.header.height");
+                                        let latest_height = match height_result {
+                                            Ok(height) => u64::from_str(height.as_str().unwrap()).unwrap(),
+                                            Err(err) => {
+                                                Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                                continue;
+                                            }
+                                        };
+                                        if sub_event.curr_height > latest_height {
+                                            println!("waiting for next block...");
+                                            continue;
+                                        }
+                                        let node_index = usize::from(sub_event.node_idx);
+                                        let req_url = format!("{}", sub_event.nodes[node_index]);
+                                        let response = request::get(req_url.as_ref());
+                                        match response {
+                                            Ok(body) => {
+                                                let txs_result = get_array(&body, "tx_responses");
+                                                let txs = match txs_result {
+                                                    Ok(txs) => txs,
+                                                    Err(err) => {
+                                                        Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                                        continue;
+                                                    }
+                                                };
+                                                for tx in txs.iter() {
+                                                    let tx_object = tx.as_object().unwrap();
+                                                    let filtered_result = libs::serde::filter(tx_object, sub_event.filter.clone());
+                                                    if filtered_result.is_err() {
+                                                        let err = filtered_result.unwrap_err();
+                                                        Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                                        continue;
+                                                    } else if filtered_result.is_ok() && !filtered_result.unwrap() {
+                                                        continue;
+                                                    }
+
+                                                    println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
+
+                                                }
+
+                                                Self::sync_event(&rocks_channel, sub_event);
+                                                sub_event.curr_height += 1;
+                                            }
+                                            Err(err) => {
+                                                Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                            }
+                                        }
+                                    }
+                                    Err(err) => {
+                                        Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
     }
-
-    fn shutdown(&mut self) {
-        /*
-         * `shutdown` SHOULD call `plugin_shutdown` in the first part.
-         */
-        if !self.plugin_shutdown() {
-            return;
-        }
-
-        // ... do remaining steps for shutdown
-    }
+    fn shutdown(&mut self) {}
 }
+
+impl EthereumPlugin {
+    fn init(&mut self) {
+        self.sub_events = Some(Arc::new(FutureMutex::new(HashMap::new())));
+        let channels = MultiChannel::new(vec!("ethereum", "rocks", "mysql", "rabbit", "mongo"));
+        self.channels = Some(channels.to_owned());
+        self.monitor = Some(app::subscribe_channel(String::from("ethereum")));
+        self.schema= Some(HashMap::new());
+        self.ether_block_mysql_sync = Some(libs::opts::bool("ethereum::block-mysql-sync").unwrap());
+        self.ether_tx_mysql_sync = Some(libs::opts::bool("ethereum::tx-musql-sync").unwrap());
+        self.ether_block_mongo_sync = Some(libs::opts::bool("ethereum::block-mongo-sync").unwrap());
+        self.ether_tx_mongo_sync = Some(libs::opts::bool("ethereum::tx-mongo-sync").unwrap());
+        self.ether_block_publish = Some(libs::opts::bool("ethereum::block-rabbit-mq-publish").unwrap());
+        self.ether_tx_publish = Some(libs::opts::bool("ethereum::tx-rabbit-mq-publish").unwrap());
+    }
+
+    fn register_jsonrpc(&self) {
+        let plugin_handle = app::get_plugin::<JsonRpcPlugin>();
+        let mut plugin = plugin_handle.lock().unwrap();
+        let jsonrpc = plugin.downcast_mut::<JsonRpcPlugin>().unwrap();
+
+        let plugin_handle = app::get_plugin::<RocksPlugin>();
+        let mut plugin = plugin_handle.lock().unwrap();
+        let rocks = plugin.downcast_mut::<RocksPlugin>().unwrap();
+
+        let ether_channel = self.channels.as_ref().unwrap().get("ethereum");
+        let rocks_db = rocks.get_db();
+        jsonrpc.add_method(String::from("ether_unsubscribe"), move |params: Params| {
+            let params: Map<String, Value> = params.parse().unwrap();
+            let verified = unsubscribe::verify(&params);
+            if verified.is_err() {
+                let mut error = Map::new();
+                error.insert(String::from("error"), Value::String(verified.unwrap_err().to_string()));
+                return Box::new(futures::future::ok(Value::Object(error)));
+            }
+
+            let task_id = get_str(&params, "task_id").unwrap();
+            let value = get_static(&rocks_db, task_id);
+            if value.is_null() {
+                let mut error = Map::new();
+                error.insert(String::from("error"), Value::String(format!("task does not exist! task_id = {}", task_id)));
+                Box::new(futures::future::ok(Value::Object(error)))
+            } else {
+                let message = EthereumMsg::new(EthereumMethod::Resubscribe, Value::Object(params.clone()));
+                let _ = ether_channel.send(message);
+
+                Box::new(futures::future::ok(Value::String(format!("resubscription requested! task_id={}", task_id))))
+            }
+        });
+
+        let ether_channel = self.channels.as_ref().unwrap().get("ethereum");
+        let rocks_db = rocks.get_db();
+        jsonrpc.add_method(String::from("ether_stop_subscription"), move |params: Params| {
+            let params: Map<String, Value> = params.parse().unwrap();
+            let verified = stop_subscribe::verify(&params);
+            if verified.is_err() {
+                let mut error = Map::new();
+                error.insert(String::from("error"), Value::String(verified.unwrap_err().to_string()));
+                return Box::new(futures::future::ok(Value::Object(error)));
+            }
+
+            let task_id = get_str(&params, "task_id").unwrap();
+            let value = get_static(&rocks_db, task_id);
+            if value.is_null() {
+                let mut error = Map::new();
+                error.insert(String::from("error"), Value::String(format!("task does not exist! task_id={}", task_id)));
+                Box::new(futures::future::ok(Value::Object(error)))
+            } else {
+                let ether_msg = EthereumMsg::new(EthereumMethod::Stop, Value::Object(params.clone()));
+                let _ = ether_channel.send(ether_msg);
+
+                Box::new(futures::future::ok(Value::String(format!("stop subscription requested! task_id={}", task_id))))
+            }
+        });
+
+        let rocks_db = rocks.get_db();
+        jsonrpc.add_method(String::from("ether_get_tasks"), move |params: Params| {
+            let params: Map<String, Value> = params.parse().unwrap();
+            let verified = get_task::verify(&params);
+            if verified.is_err() {
+                let mut error = Map::new();
+                error.insert(String::from("error"), Value::String(verified.unwrap_err().to_string()));
+                return Box::new(futures::future::ok(Value::Object(error)));
+            }
+            let prefix = match params.get("task_id") {
+                None => TASK_PREFIX,
+                Some(task_id) => task_id.as_str().unwrap()
+            };
+            let tasks = get_by_prefix_static(&rocks_db, prefix);
+            Box::new(futures::future::ok(tasks))
+        });
+    }
+
+        fn load_tasks(&self) {
+            let plugin_handle = app::get_plugin::<RocksPlugin>();
+            let mut plugin = plugin_handle.lock().unwrap();
+            let rocks = plugin.downcast_mut::<RocksPlugin>().unwrap();
+
+            let rocks_db = rocks.get_db();
+            let raw_tasks = get_by_prefix_static(&rocks_db, TASK_PREFIX);
+            let sub_events = Arc::clone(self.sub_events.as_ref().unwrap());
+            raw_tasks.as_array().unwrap().iter()
+                .for_each(|raw_task| {
+                    let task = raw_task.as_object().unwrap();
+                    let event = SubscribeEvent::from(task);
+                    let mut sub_events_lock = sub_events.try_lock().unwrap();
+                    sub_events_lock.insert(event.task_id.clone(), event);
+            });
+
+        }
+
+    fn sync_event(rocks_channel: &channel::Sender, sub_event: &mut SubscribeEvent) {
+        let task = SubscribeTask::from(&sub_event, String::from(""));
+        let task_id = task.task_id.clone();
+
+        let msg = RocksMsg::new(RocksMethod::Put, task_id, Value::String(json!(task).to_string()));
+        let _ = rocks_channel.send(msg);
+    }
+
+        fn error_handler(rocks_channel : &channel::Sender, sub_event: &mut SubscribeEvent, err_msg: String) {
+            let task = SubscribeTask::from(&sub_event, String::from(""));
+            let task_id = task.task_id.clone();
+
+            let msg = RocksMsg::new(RocksMethod::Put, task_id, Value::String(json!(task).to_string()));
+            let _ = rocks_channel.send(msg);
+        }
+
+
+    }
+
