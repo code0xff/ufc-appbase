@@ -1,9 +1,7 @@
 use serde_json::{Map, Value};
 
-
 use crate::error::error::ExpectedError;
 use crate::libs::serde::get_string;
-use std::collections::HashMap;
 
 pub fn get(url: &str) -> Result<Map<String, Value>, ExpectedError> {
     let res = reqwest::blocking::get(url)?;
@@ -18,8 +16,8 @@ pub fn get(url: &str) -> Result<Map<String, Value>, ExpectedError> {
     Ok(parsed_body)
 }
 
-pub fn post(url: &str, req_body : &str) -> Result<Map<String, Value>, ExpectedError> {
-    let req = req_body.to_string();
+pub fn post(url: &str, req_body: &str) -> Result<Map<String, Value>, ExpectedError> {
+    let req = String::from(req_body);
     let client = reqwest::blocking::Client::new();
     let res = client.post(url).body(req).header("Content-Type", "application/json").send()?;
     let status = res.status().clone();

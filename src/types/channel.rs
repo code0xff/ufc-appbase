@@ -17,10 +17,6 @@ impl MultiChannel {
         }
     }
 
-    // pub fn add(&mut self, name: String) {
-    //     self.channel_map.insert(name.clone(), app::get_channel(name.clone()));
-    // }
-
     pub fn get(&self, name: &str) -> channel::Sender {
         self.channel_map.get(name).unwrap().clone()
     }
