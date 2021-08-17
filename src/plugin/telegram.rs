@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use appbase::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use teloxide::Bot;
+use teloxide::prelude::*;
 
 use crate::libs;
 use crate::libs::serde::get_str;
@@ -10,6 +12,7 @@ use crate::message;
 
 pub struct TelegramPlugin {
     token: Option<String>,
+    bot: Option<AutoSend<Bot>>,
     monitor: Option<channel::Receiver>,
 }
 
@@ -23,6 +26,7 @@ impl Plugin for TelegramPlugin {
 
         TelegramPlugin {
             token: None,
+            bot: None,
             monitor: None,
         }
     }
@@ -30,14 +34,18 @@ impl Plugin for TelegramPlugin {
     fn initialize(&mut self) {
         let token = libs::opts::string("telegram::bot-token").unwrap();
         self.token = Some(token.clone());
+        let bot = Bot::new(token).auto_send();
+        self.bot = Some(bot);
         self.monitor = Some(app::subscribe_channel(String::from("telegram")));
     }
 
     fn startup(&mut self) {
         let monitor = self.monitor.take().unwrap();
         let token = self.token.as_ref().unwrap().clone();
+        let bot = self.bot.as_ref().unwrap().clone();
         let app = app::quit_handle().unwrap();
         Self::recv(monitor, token, app);
+        Self::api(bot);
     }
 
     fn shutdown(&mut self) {}
@@ -67,6 +75,15 @@ impl TelegramPlugin {
             if !app.is_quiting() {
                 Self::recv(monitor, token, app);
             }
+        });
+    }
+
+    fn api(bot: AutoSend<Bot>) {
+        app::spawn(async move {
+            teloxide::repl(bot, |message| async move {
+                let _ = message.reply_to(format!("You can use telegram features of UFC with your chat ID! YOUR_CHAT_ID={}", message.chat_id())).await;
+                respond(())
+            }).await;
         });
     }
 }
