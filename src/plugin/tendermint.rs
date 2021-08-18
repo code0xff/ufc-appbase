@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::fs;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use appbase::*;
@@ -99,7 +98,7 @@ impl Plugin for TendermintPlugin {
                         continue;
                     }
                     if sub_event.target == SubscribeTarget::Block {
-                        let block_header = Self::poll_block(sub_event);
+                        let block_header = Self::poll_block_header(sub_event);
                         match block_header {
                             Ok(header) => {
                                 println!("event_id={}, header={}", sub_event.event_id(), header.to_string());
@@ -116,65 +115,54 @@ impl Plugin for TendermintPlugin {
                                 };
 
                                 Self::sync_event(&rocks_channel, sub_event);
-                                sub_event.curr_height += 1;
                             }
-                            Err(err) => {
-                                match err {
-                                    ExpectedError::IgnoreError(err_msg) => println!("{}", err_msg),
-                                    _ => Self::error_handler(&rocks_channel, sub_event, err.to_string())
-                                };
-                            }
+                            Err(error) => Self::error_handler(&rocks_channel, sub_event, error)
                         };
                     } else {
-                        let latest_height_result = Self::poll_latest_height(sub_event);
-                        let latest_height = match latest_height_result {
-                            Ok(latest_height) => latest_height,
-                            Err(err) => {
-                                Self::error_handler(&rocks_channel, sub_event, err.to_string());
-                                continue;
-                            }
-                        };
+                        let block_txs_result = Self::poll_block_txs(sub_event);
+                        match block_txs_result {
+                            Ok(block_txs) => {
+                                if block_txs.len() > 0 {
+                                    let txs_result = Self::poll_txs(sub_event);
+                                    let txs = match txs_result {
+                                        Ok(txs) => txs,
+                                        Err(err) => {
+                                            sub_event.handle_error(&rocks_channel, err.to_string());
+                                            continue;
+                                        }
+                                    };
 
-                        if sub_event.curr_height > latest_height {
-                            println!("waiting for next block...");
-                            continue;
+                                    for tx in txs.iter() {
+                                        let tx_object = tx.as_object().unwrap();
+                                        let filtered_result = libs::serde::filter(tx_object, sub_event.filter.clone());
+                                        if filtered_result.is_err() {
+                                            let err = filtered_result.unwrap_err();
+                                            sub_event.handle_error(&rocks_channel, err.to_string());
+                                            continue;
+                                        } else if filtered_result.is_ok() && !filtered_result.unwrap() {
+                                            continue;
+                                        }
+
+                                        println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
+
+                                        if let Err(err) = Self::tx_callback(
+                                            &tx,
+                                            &schema,
+                                            "tm_tx",
+                                            &mysql_channel,
+                                            &mongo_channel,
+                                            &rabbit_channel,
+                                        ) {
+                                            println!("{}", err.to_string());
+                                        }
+                                    }
+                                } else {
+                                    println!("block txs is empty! curr_height={}", sub_event.curr_height);
+                                }
+                                Self::sync_event(&rocks_channel, sub_event);
+                            }
+                            Err(error) => Self::error_handler(&rocks_channel, sub_event, error)
                         }
-                        let txs_result = Self::poll_txs(sub_event);
-                        let txs = match txs_result {
-                            Ok(txs) => txs,
-                            Err(err) => {
-                                Self::error_handler(&rocks_channel, sub_event, err.to_string());
-                                continue;
-                            }
-                        };
-
-                        for tx in txs.iter() {
-                            let tx_object = tx.as_object().unwrap();
-                            let filtered_result = libs::serde::filter(tx_object, sub_event.filter.clone());
-                            if filtered_result.is_err() {
-                                let err = filtered_result.unwrap_err();
-                                Self::error_handler(&rocks_channel, sub_event, err.to_string());
-                                continue;
-                            } else if filtered_result.is_ok() && !filtered_result.unwrap() {
-                                continue;
-                            }
-
-                            println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
-
-                            if let Err(err) = Self::tx_callback(
-                                &tx,
-                                &schema,
-                                "tm_tx",
-                                &mysql_channel,
-                                &mongo_channel,
-                                &rabbit_channel,
-                            ) {
-                                println!("{}", err.to_string());
-                            }
-                        }
-
-                        Self::sync_event(&rocks_channel, sub_event);
-                        sub_event.curr_height += 1;
                     }
                 }
             }
@@ -413,14 +401,21 @@ impl TendermintPlugin {
 
         let msg = RocksMsg::new(RocksMethod::Put, task_id, Value::String(json!(task).to_string()));
         let _ = rocks_channel.send(msg);
+
+        sub_event.curr_height += 1;
     }
 
-    fn error_handler(rocks_channel: &channel::Sender, sub_event: &mut SubscribeEvent, err_msg: String) {
-        sub_event.handle_err(err_msg.clone());
-        let task = SubscribeTask::from(sub_event, err_msg);
-
-        let msg = RocksMsg::new(RocksMethod::Put, sub_event.task_id.clone(), Value::String(json!(task).to_string()));
-        let _ = rocks_channel.send(msg);
+    fn error_handler(rocks_channel: &channel::Sender, sub_event: &mut SubscribeEvent, error: ExpectedError) {
+        match error {
+            ExpectedError::BlockHeightError(err_msg) => println!("{}", err_msg),
+            ExpectedError::FilterError(err_msg) => {
+                println!("{}", err_msg);
+                Self::sync_event(&rocks_channel, sub_event);
+            }
+            _ => {
+                sub_event.handle_error(&rocks_channel, error.to_string());
+            }
+        };
     }
 
     fn mysql_send(mysql_channel: &channel::Sender, schema: Schema, values: &Map<String, Value>) -> Result<(), ExpectedError> {
@@ -484,31 +479,39 @@ impl TendermintPlugin {
             Ok(body) => body,
             Err(err) => {
                 return if err.to_string().starts_with("requested block height") {
-                    Err(ExpectedError::IgnoreError(err.to_string()))
+                    Err(ExpectedError::BlockHeightError(err.to_string()))
                 } else {
                     Err(err)
                 };
             }
         };
+        let block = opt_to_result(body.get("block"))?;
+        Ok(block.clone())
+    }
 
-        let block = get_object(&body, "block")?;
+    fn poll_block_header(sub_event: &mut SubscribeEvent) -> Result<Value, ExpectedError> {
+        let block_value = Self::poll_block(sub_event)?;
+        let block = opt_to_result(block_value.as_object())?;
         let header = opt_to_result(block.get("header"))?;
         let header_object = opt_to_result(header.as_object())?;
 
         let filter_result = libs::serde::filter(header_object, sub_event.filter.clone())?;
         if !filter_result {
-            return Err(ExpectedError::IgnoreError(String::from("value does not match on filter condition!")));
+            return Err(ExpectedError::FilterError(String::from("value does not match on filter condition!")));
         }
         Ok(header.clone())
     }
 
-    fn poll_latest_height(sub_event: &mut SubscribeEvent) -> Result<u64, ExpectedError> {
-        let node_idx = usize::from(sub_event.node_idx);
-        let latest_req_url = format!("{}/blocks/latest", sub_event.nodes[node_idx]);
-        let body = request::get(latest_req_url.as_ref())?;
-        let height = get_value_by_path(&body, "block.header.height")?;
-        let latest_height = u64::from_str(opt_to_result(height.as_str())?)?;
-        Ok(latest_height)
+    fn poll_block_txs(sub_event: &mut SubscribeEvent) -> Result<Vec<Value>, ExpectedError> {
+        let block_value = Self::poll_block(sub_event)?;
+        let block = opt_to_result(block_value.as_object())?;
+        let txs_value = get_value_by_path(block, "data.txs")?;
+        if !txs_value.is_array() {
+            return Err(ExpectedError::TypeError(String::from("txs in block data is not array!")));
+        }
+        let txs = opt_to_result(txs_value.as_array())?;
+
+        Ok(txs.clone())
     }
 
     fn poll_txs(sub_event: &mut SubscribeEvent) -> Result<Vec<Value>, ExpectedError> {

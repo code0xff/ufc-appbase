@@ -1,8 +1,10 @@
+use appbase::channel;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 
 use crate::enumeration;
 use crate::libs::serde::{get_str, get_string, get_string_vec, get_u64};
+use crate::plugin::rocks::{RocksMethod, RocksMsg};
 use crate::types::enumeration::Enumeration;
 use crate::types::subscribe::SubscribeStatus::Working;
 
@@ -67,18 +69,16 @@ impl SubscribeEvent {
         format!("{}:{}:{}:{}", self.chain, self.target.value(), self.sub_id, self.curr_height)
     }
 
-    pub fn handle_err(&mut self, err_msg: String) {
-        println!("{}", err_msg);
+    pub fn handle_error(&mut self, rocks_channel: &channel::Sender, err_msg: String) {
+        println!("{}", err_msg.clone());
         if usize::from(self.node_idx) + 1 < self.nodes.len() {
             self.node_idx += 1;
         } else {
-            self.err(err_msg);
+            self.status = SubscribeStatus::Error;
         }
-    }
-
-    pub fn err(&mut self, err_msg: String) {
-        println!("{}", err_msg);
-        self.status = SubscribeStatus::Error;
+        let task = SubscribeTask::from(self, err_msg.clone());
+        let msg = RocksMsg::new(RocksMethod::Put, self.task_id.clone(), Value::String(json!(task).to_string()));
+        let _ = rocks_channel.send(msg);
     }
 }
 

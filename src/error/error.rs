@@ -14,7 +14,8 @@ pub enum ExpectedError {
     RequestError(String),
     ParsingError(String),
     ChannelError(String),
-    IgnoreError(String),
+    FilterError(String),
+    BlockHeightError(String),
 }
 
 impl From<smtp::Error> for ExpectedError {
@@ -72,7 +73,8 @@ impl Display for ExpectedError {
             ExpectedError::RequestError(err) => write!(f, "{}", err),
             ExpectedError::ParsingError(err) => write!(f, "{}", err),
             ExpectedError::ChannelError(err) => write!(f, "{}", err),
-            ExpectedError::IgnoreError(err) => write!(f, "{}", err),
+            ExpectedError::FilterError(err) => write!(f, "{}", err),
+            ExpectedError::BlockHeightError(err) => write!(f, "{}", err),
         }
     }
 }
