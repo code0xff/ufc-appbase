@@ -475,7 +475,7 @@ impl TendermintPlugin {
     fn poll_block(sub_event: &mut SubscribeEvent) -> Result<Value, ExpectedError> {
         let node_index = usize::from(sub_event.node_idx);
         let req_url = format!("{}/blocks/{}", sub_event.nodes[node_index], sub_event.curr_height);
-        let response = request::get(req_url.as_ref());
+        let response = request::get(req_url.as_str());
         let body = match response {
             Ok(body) => body,
             Err(err) => {
@@ -518,7 +518,7 @@ impl TendermintPlugin {
     fn poll_txs(sub_event: &mut SubscribeEvent) -> Result<Vec<Value>, ExpectedError> {
         let node_index = usize::from(sub_event.node_idx);
         let req_url = format!("{}/cosmos/tx/v1beta1/txs?events=tx.height={}", sub_event.nodes[node_index], sub_event.curr_height);
-        let body = request::get(req_url.as_ref())?;
+        let body = request::get(req_url.as_str())?;
 
         let txs_result = get_array(&body, "tx_responses")?;
         Ok(txs_result.clone())
