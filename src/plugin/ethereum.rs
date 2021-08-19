@@ -1,22 +1,23 @@
 use std::collections::HashMap;
+use std::fs;
 use std::sync::Arc;
 
 use appbase::*;
 use appbase::channel::Sender;
+use appbase::plugin::State;
 use futures::lock::Mutex as FutureMutex;
 use jsonrpc_core::Params;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use crate::{enumeration, message};
+use crate::{enumeration, libs, message};
 use crate::error::error::ExpectedError;
 use crate::libs::opts::opt_to_result;
 use crate::libs::request;
 use crate::libs::rocks::{get_by_prefix_static, get_static};
 use crate::libs::serde::{get_array, get_object, get_str, get_string};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
-use crate::plugin::mongo::{MongoMsg, MongoPlugin};
-use crate::plugin::mysql::{MySqlMsg, MySqlPlugin};
+use crate::plugin::mysql::MySqlPlugin;
 use crate::plugin::rocks::{RocksMethod, RocksMsg, RocksPlugin};
 use crate::types::channel::MultiChannel;
 use crate::types::enumeration::Enumeration;
@@ -42,12 +43,12 @@ plugin::requires!(EthereumPlugin; JsonRpcPlugin, RocksPlugin);
 
 impl Plugin for EthereumPlugin {
     fn new() -> Self {
-        // app::arg(clap::Arg::new("ethereum::block-mysql-sync").long("ether-block-mysql-sync"));
-        // app::arg(clap::Arg::new("ethereum::tx-mysql-sync").long("ether-tx-mysql-sync"));
-        // app::arg(clap::Arg::new("ethereum::block-mongo-sync").long("ether-block-mongo-sync"));
-        // app::arg(clap::Arg::new("ethereum::tx-mongo-sync").long("ether-tx-mongo-sync"));
-        // app::arg(clap::Arg::new("ethereum::block-rabbit-mg-sync").long("ether-block-mysql-sync"));
-        // app::arg(clap::Arg::new("ethereum::tx-rabbit-mq-sync").long("ether-tx-rabbit-mq-sync"));
+        app::arg(clap::Arg::new("ethereum::block-mysql-sync").long("eth-block-mysql-sync"));
+        app::arg(clap::Arg::new("ethereum::tx-mysql-sync").long("eth-tx-mysql-sync"));
+        app::arg(clap::Arg::new("ethereum::block-mongo-sync").long("eth-block-mongo-sync"));
+        app::arg(clap::Arg::new("ethereum::tx-mongo-sync").long("eth-tx-mongo-sync"));
+        app::arg(clap::Arg::new("ethereum::block-rabbit-mq-sync").long("eth-block-rabbit-mq-sync"));
+        app::arg(clap::Arg::new("ethereum::tx-rabbit-mq-sync").long("eth-tx-rabbit-mq-sync"));
 
         EthereumPlugin {
             sub_events: None,
@@ -60,6 +61,7 @@ impl Plugin for EthereumPlugin {
     fn initialize(&mut self) {
         self.init();
         self.register_jsonrpc();
+        self.init_mysql();
         self.load_tasks();
     }
 
@@ -68,9 +70,9 @@ impl Plugin for EthereumPlugin {
         let sub_events = Arc::clone(self.sub_events.as_ref().unwrap());
 
         let mut rocks_channel = self.channels.as_ref().unwrap().get("rocks");
-        // let mysql_channel = self.channels.as_ref().unwrap().get("mysql");
-        // let rabbit_channel = self.channels.as_ref().unwrap().get("rabbit");
-        // let mongo_channel = self.channels.as_ref().unwrap().get("mongo");
+        let mysql_channel = self.channels.as_ref().unwrap().get("mysql");
+        let rabbit_channel = self.channels.as_ref().unwrap().get("rabbit");
+        let mongo_channel = self.channels.as_ref().unwrap().get("mongo");
         let app = app::quit_handle().unwrap();
 
         let schema = self.schema.as_ref().unwrap().clone();
@@ -96,6 +98,18 @@ impl Plugin for EthereumPlugin {
                             match block_result {
                                 Ok(block) => {
                                     println!("event_id={}, block={}", sub_event.event_id(), block.to_string());
+                                    let selected_schema = schema.get("eth_block").unwrap();
+                                    let callback_prefix = format!("{}::{}", CHAIN, sub_event.target.value());
+                                    if let Err(err) = libs::subscribe::callback(
+                                        callback_prefix,
+                                        &block,
+                                        &selected_schema,
+                                        &mysql_channel,
+                                        &mongo_channel,
+                                        &rabbit_channel,
+                                    ) {
+                                        println!("{}", err.to_string());
+                                    };
 
                                     Self::sync_event(&rocks_channel, sub_event);
                                     sub_event.curr_height += 1;
@@ -108,7 +122,20 @@ impl Plugin for EthereumPlugin {
                                 Ok(txs) => {
                                     for tx in txs {
                                         println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
+                                        let selected_schema = schema.get("eth_tx").unwrap();
+                                        let callback_prefix = format!("{}::{}", CHAIN, sub_event.target.value());
+                                        if let Err(err) = libs::subscribe::callback(
+                                            callback_prefix,
+                                            &tx,
+                                            selected_schema,
+                                            &mysql_channel,
+                                            &mongo_channel,
+                                            &rabbit_channel,
+                                        ) {
+                                            println!("{}", err.to_string());
+                                        }
                                     }
+
                                     Self::sync_event(&rocks_channel, sub_event);
                                     sub_event.curr_height += 1;
                                 }
@@ -367,6 +394,34 @@ impl EthereumPlugin {
         let block = opt_to_result(block_value.as_object())?;
         let transactions = get_array(block, "transactions")?;
         Ok(transactions.clone())
+    }
+
+    fn init_mysql(&mut self) {
+        if let Some(state) = app::plugin_state::<MySqlPlugin>() {
+            if state != State::Initialized {
+                return;
+            }
+        }
+        let json_str = fs::read_to_string("schema/eth_mysql.json").unwrap();
+        let json_schema: Value = serde_json::from_str(json_str.as_str()).unwrap();
+        let schema_map = json_schema.as_object().unwrap();
+
+        let schema = self.schema.as_mut().unwrap();
+        for (table, values) in schema_map {
+            let created_schema = Schema::from(table.clone(), values).unwrap();
+            schema.insert(table.clone(), created_schema);
+        }
+
+        let plugin_handle = app::get_plugin::<MySqlPlugin>();
+        let mut plugin = plugin_handle.lock().unwrap();
+        let mysql = plugin.downcast_mut::<MySqlPlugin>().unwrap();
+
+        for (_, selected_schema) in schema.iter() {
+            let result = mysql.execute(selected_schema.create_table.clone(), mysql::Params::Empty);
+            if let Err(err) = result {
+                println!("error={}", err.to_string());
+            }
+        }
     }
 }
 

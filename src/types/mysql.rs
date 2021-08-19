@@ -10,7 +10,7 @@ use crate::types::enumeration::Enumeration;
 
 #[derive(Clone, Debug)]
 pub struct Schema {
-    table: String,
+    pub table: String,
     pub attributes: Vec<Attribute>,
     pub create_table: String,
     pub insert_query: String,
@@ -88,10 +88,10 @@ impl Schema {
             let converted_type = convert_type(attribute._type.clone(), attribute.max_length).unwrap();
             match attribute.max_length {
                 None => {
-                    query_line.push(format!("`{}` {} {}", attribute.name, converted_type, Self::get_null_or_not(attribute.nullable)));
+                    query_line.push(format!("`{}` {} {}", attribute.name, converted_type, Self::null_or_not(attribute.nullable)));
                 }
                 Some(size) => {
-                    query_line.push(format!("`{}` {}({}) {}", attribute.name, converted_type, size, Self::get_null_or_not(attribute.nullable)));
+                    query_line.push(format!("`{}` {}({}) {}", attribute.name, converted_type, size, Self::null_or_not(attribute.nullable)));
                 }
             }
         }
@@ -100,14 +100,14 @@ impl Schema {
         for raw_keys in uniques.iter() {
             let unique_vec: Vec<String> = raw_keys.as_array().unwrap().iter().map(|v| { String::from(v.as_str().unwrap()) }).collect();
             let unique_name = format!("{}_{}_unique", table, unique_vec.join("_"));
-            let unique_keys = unique_vec.join(", ");
+            let unique_keys = unique_vec.iter().map(|v| { format!("`{}`", v) }).collect::<Vec<String>>().join(", ");
             query_line.push(format!("unique key `{}` ({})", unique_name, unique_keys));
         }
 
         for raw_keys in indexes.iter() {
             let index_vec: Vec<String> = raw_keys.as_array().unwrap().iter().map(|v| { String::from(v.as_str().unwrap()) }).collect();
             let index_name = format!("{}_{}_index", table, index_vec.join("_"));
-            let index_keys = index_vec.join(", ");
+            let index_keys = index_vec.iter().map(|v| { format!("`{}`", v) }).collect::<Vec<String>>().join(", ");
             query_line.push(format!("key `{}` ({}) using btree", index_name, index_keys));
         }
 
@@ -117,14 +117,13 @@ impl Schema {
     }
 
     fn insert_query(table: String, attributes: &Vec<Attribute>) -> String {
-        let mut columns: Vec<String> = attributes.iter().map(|attribute| { attribute.clone().name.clone() }).collect();
-        let column_str = columns.join(", ");
-        let converted: Vec<String> = columns.iter_mut().map(|v| { format!(":{}", v) }).collect();
-        let values = converted.join(", ");
-        format!("insert into {} ({}) values ({})", table, column_str, values)
+        let columns: Vec<String> = attributes.iter().map(|attribute| { attribute.clone().name.clone() }).collect();
+        let column_names = columns.iter().map(|v| { format!("`{}`", v) }).collect::<Vec<String>>().join(", ");
+        let values = columns.iter().map(|v| { format!(":{}", v) }).collect::<Vec<String>>().join(", ");
+        format!("insert into {} ({}) values ({})", table, column_names, values)
     }
 
-    fn get_null_or_not(nullable: bool) -> String {
+    fn null_or_not(nullable: bool) -> String {
         if nullable {
             String::from("null")
         } else {
