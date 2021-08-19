@@ -115,6 +115,7 @@ impl Plugin for TendermintPlugin {
                                 };
 
                                 Self::sync_event(&rocks_channel, sub_event);
+                                sub_event.curr_height += 1;
                             }
                             Err(error) => Self::error_handler(&rocks_channel, sub_event, error)
                         };
@@ -160,6 +161,7 @@ impl Plugin for TendermintPlugin {
                                     println!("block txs is empty! curr_height={}", sub_event.curr_height);
                                 }
                                 Self::sync_event(&rocks_channel, sub_event);
+                                sub_event.curr_height += 1;
                             }
                             Err(error) => Self::error_handler(&rocks_channel, sub_event, error)
                         }
@@ -401,8 +403,6 @@ impl TendermintPlugin {
 
         let msg = RocksMsg::new(RocksMethod::Put, task_id, Value::String(json!(task).to_string()));
         let _ = rocks_channel.send(msg);
-
-        sub_event.curr_height += 1;
     }
 
     fn error_handler(rocks_channel: &channel::Sender, sub_event: &mut SubscribeEvent, error: ExpectedError) {
@@ -411,6 +411,7 @@ impl TendermintPlugin {
             ExpectedError::FilterError(err_msg) => {
                 println!("{}", err_msg);
                 Self::sync_event(&rocks_channel, sub_event);
+                sub_event.curr_height += 1;
             }
             _ => {
                 sub_event.handle_error(&rocks_channel, error.to_string());
