@@ -1,0 +1,173 @@
+{
+  "eth_block": {
+    "attributes": {
+      "baseFeePerGas": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "difficulty": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "extraData": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "gasLimit": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "gasUsed": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "hash": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "logsBloom": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 65536
+      },
+      "miner": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "mixHash": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "nonce": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "number": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "parentHash": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "receiptsRoot": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "sha3Uncles": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "size": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "stateRoot": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "timestamp": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "totalDifficulty": {
+        "type": "string",
+        "maxLength": 100
+      }
+    },
+    "indexes": [
+      [
+        "number"
+      ]
+    ],
+    "uniques": [
+      [
+        "number"
+      ]
+    ]
+  },
+  "eth_tx": {
+    "attributes": {
+      "blockHash": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "blockNumber": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "chainId": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "from": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "to": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "gas": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "gasPrice": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "hash": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "input": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 65536
+      },
+      "maxFeePerGas": {
+        "type": "string",
+        "maxLength": 65536
+      },
+      "maxPriorityFeePerGas": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "nonce": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "transactionIndex": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "value": {
+        "type": "string",
+        "maxLength": 100
+      }
+    },
+    "indexes": [
+      [
+        "blockNumber"
+      ],
+      [
+        "hash"
+      ],
+      [
+        "from"
+      ],
+      [
+        "to"
+      ]
+    ],
+    "uniques": [
+      [
+        "hash"
+      ]
+    ]
+  }
+}

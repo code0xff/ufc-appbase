@@ -18,8 +18,7 @@ use crate::libs::request;
 use crate::libs::rocks::{get_by_prefix_static, get_static};
 use crate::libs::serde::{get_array, get_object, get_str, get_string, get_value_by_path, select_value};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
-use crate::plugin::mongo::{MongoMsg, MongoPlugin};
-use crate::plugin::mysql::{MySqlMsg, MySqlPlugin};
+use crate::plugin::mysql::MySqlPlugin;
 use crate::plugin::rocks::{RocksMethod, RocksMsg, RocksPlugin};
 use crate::types::channel::MultiChannel;
 use crate::types::enumeration::Enumeration;
@@ -102,11 +101,12 @@ impl Plugin for TendermintPlugin {
                         match block_header {
                             Ok(header) => {
                                 println!("event_id={}, header={}", sub_event.event_id(), header.to_string());
-
-                                if let Err(err) = Self::block_callback(
+                                let selected_schema = schema.get("tm_block").unwrap();
+                                let callback_prefix = format!("{}::{}", CHAIN, sub_event.target.value());
+                                if let Err(err) = libs::subscribe::callback(
+                                    callback_prefix,
                                     &header,
-                                    &schema,
-                                    "tm_block",
+                                    &selected_schema,
                                     &mysql_channel,
                                     &mongo_channel,
                                     &rabbit_channel,
@@ -146,10 +146,12 @@ impl Plugin for TendermintPlugin {
 
                                         println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
 
-                                        if let Err(err) = Self::tx_callback(
-                                            &tx,
-                                            &schema,
-                                            "tm_tx",
+                                        let selected_schema = schema.get("tm_tx").unwrap();
+                                        let callback_prefix = format!("{}::{}", CHAIN, sub_event.target.value());
+                                        if let Err(err) = libs::subscribe::callback(
+                                            callback_prefix,
+                                            tx,
+                                            selected_schema,
                                             &mysql_channel,
                                             &mongo_channel,
                                             &rabbit_channel,
@@ -419,15 +421,6 @@ impl TendermintPlugin {
         };
     }
 
-    fn mysql_send(mysql_channel: &channel::Sender, schema: Schema, values: &Map<String, Value>) -> Result<(), ExpectedError> {
-        let insert_query = schema.insert_query;
-        let names: Vec<&str> = schema.attributes.iter().map(|attribute| { attribute.name.as_str() }).collect();
-        let picked_value = select_value(values, names)?;
-        let mysql_msg = MySqlMsg::new(String::from(insert_query), Value::Object(picked_value));
-        let _ = mysql_channel.send(mysql_msg)?;
-        Ok(())
-    }
-
     fn message_handler(msg: &Value, sub_events: &mut HashMap<String, SubscribeEvent>, rocks_channel: &mut Sender) {
         let parsed_msg = msg.as_object().unwrap();
         let method = TendermintMethod::find(get_str(parsed_msg, "method").unwrap()).unwrap();
@@ -475,7 +468,7 @@ impl TendermintPlugin {
     fn poll_block(sub_event: &mut SubscribeEvent) -> Result<Value, ExpectedError> {
         let node_index = usize::from(sub_event.node_idx);
         let req_url = format!("{}/blocks/{}", sub_event.nodes[node_index], sub_event.curr_height);
-        let response = request::get(req_url.as_ref());
+        let response = request::get(req_url.as_str());
         let body = match response {
             Ok(body) => body,
             Err(err) => {
@@ -518,37 +511,9 @@ impl TendermintPlugin {
     fn poll_txs(sub_event: &mut SubscribeEvent) -> Result<Vec<Value>, ExpectedError> {
         let node_index = usize::from(sub_event.node_idx);
         let req_url = format!("{}/cosmos/tx/v1beta1/txs?events=tx.height={}", sub_event.nodes[node_index], sub_event.curr_height);
-        let body = request::get(req_url.as_ref())?;
+        let body = request::get(req_url.as_str())?;
 
         let txs_result = get_array(&body, "tx_responses")?;
         Ok(txs_result.clone())
-    }
-
-    fn block_callback(header: &Value, schema: &HashMap<String, Schema>, schema_name: &str, mysql: &Sender, mongo: &Sender, rabbit: &Sender) -> Result<(), ExpectedError> {
-        if libs::opts::bool("tendermint::block-mysql-sync")? {
-            Self::mysql_send(&mysql, opt_to_result(schema.get(schema_name))?.clone(), header.as_object().unwrap())?
-        }
-        if libs::opts::bool("tendermint::block-mongo-sync")? {
-            let mongo_msg = MongoMsg::new(String::from("tm_block"), header.clone());
-            let _ = mongo.send(mongo_msg)?;
-        }
-        if libs::opts::bool("tendermint::block-rabbit-mq-publish")? {
-            let _ = rabbit.send(Value::String(header.to_string()))?;
-        }
-        Ok(())
-    }
-
-    fn tx_callback(tx: &Value, schema: &HashMap<String, Schema>, schema_name: &str, mysql: &Sender, mongo: &Sender, rabbit: &Sender) -> Result<(), ExpectedError> {
-        if libs::opts::bool("tendermint::tx-mysql-sync")? {
-            Self::mysql_send(&mysql, opt_to_result(schema.get(schema_name))?.clone(), tx.as_object().unwrap())?
-        }
-        if libs::opts::bool("tendermint::tx-mongo-sync")? {
-            let mongo_msg = MongoMsg::new(String::from("tm_tx"), tx.clone());
-            let _ = mongo.send(mongo_msg)?;
-        }
-        if libs::opts::bool("tendermint::tx-rabbit-mq-publish")? {
-            let _ = rabbit.send(Value::String(tx.to_string()))?;
-        }
-        Ok(())
     }
 }

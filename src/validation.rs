@@ -7,4 +7,3 @@ pub mod get_blocks;
 pub mod get_txs;
 pub mod resubscribe;
 pub mod stop_subscribe;
-pub mod ether_subscribe;
