@@ -187,7 +187,7 @@ impl TendermintPlugin {
                 return;
             }
         }
-        let json_str = fs::read_to_string("../../schema/tm_mysql.json").unwrap();
+        let json_str = fs::read_to_string("schema/tm_mysql.json").unwrap();
         let json_schema: Value = serde_json::from_str(json_str.as_str()).unwrap();
         let schema_map = json_schema.as_object().unwrap();
 
