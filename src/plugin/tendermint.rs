@@ -101,16 +101,16 @@ impl Plugin for TendermintPlugin {
                         match block_header {
                             Ok(header) => {
                                 println!("event_id={}, header={}", sub_event.event_id(), header.to_string());
-                                let selected_schema = schema.get("tm_block").unwrap();
-                                let callback_prefix = format!("{}::{}", CHAIN, sub_event.target.value());
-                                if let Err(err) = libs::subscribe::callback(
-                                    callback_prefix,
-                                    &header,
-                                    &selected_schema,
-                                    &mysql_channel,
-                                    &mongo_channel,
-                                    &rabbit_channel,
-                                ) {
+
+                                let schema_opt = schema.get("tm_block");
+                                let prefix = format!("{}::{}", CHAIN, sub_event.target.value());
+                                if let Err(err) = libs::callback::mysql(prefix.clone(), &header, schema_opt, &mysql_channel) {
+                                    println!("{}", err.to_string());
+                                };
+                                if let Err(err) = libs::callback::mongo(prefix.clone(), &header, "tm_block", &mongo_channel) {
+                                    println!("{}", err.to_string());
+                                };
+                                if let Err(err) = libs::callback::rabbit(prefix, &header, &rabbit_channel) {
                                     println!("{}", err.to_string());
                                 };
 
@@ -146,18 +146,17 @@ impl Plugin for TendermintPlugin {
 
                                         println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
 
-                                        let selected_schema = schema.get("tm_tx").unwrap();
-                                        let callback_prefix = format!("{}::{}", CHAIN, sub_event.target.value());
-                                        if let Err(err) = libs::subscribe::callback(
-                                            callback_prefix,
-                                            tx,
-                                            selected_schema,
-                                            &mysql_channel,
-                                            &mongo_channel,
-                                            &rabbit_channel,
-                                        ) {
+                                        let schema_opt = schema.get("tm_tx");
+                                        let prefix = format!("{}::{}", CHAIN, sub_event.target.value());
+                                        if let Err(err) = libs::callback::mysql(prefix.clone(), &tx, schema_opt, &mysql_channel) {
                                             println!("{}", err.to_string());
-                                        }
+                                        };
+                                        if let Err(err) = libs::callback::mongo(prefix.clone(), &tx, "tm_tx", &mongo_channel) {
+                                            println!("{}", err.to_string());
+                                        };
+                                        if let Err(err) = libs::callback::rabbit(prefix, &tx, &rabbit_channel) {
+                                            println!("{}", err.to_string());
+                                        };
                                     }
                                 } else {
                                     println!("block txs is empty! curr_height={}", sub_event.curr_height);

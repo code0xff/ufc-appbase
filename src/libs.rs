@@ -4,4 +4,4 @@ pub mod rocks;
 pub mod mongo;
 pub mod opts;
 pub mod request;
-pub mod subscribe;
+pub mod callback;

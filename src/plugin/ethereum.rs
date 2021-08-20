@@ -98,16 +98,16 @@ impl Plugin for EthereumPlugin {
                             match block_result {
                                 Ok(block) => {
                                     println!("event_id={}, block={}", sub_event.event_id(), block.to_string());
-                                    let selected_schema = schema.get("eth_block").unwrap();
-                                    let callback_prefix = format!("{}::{}", CHAIN, sub_event.target.value());
-                                    if let Err(err) = libs::subscribe::callback(
-                                        callback_prefix,
-                                        &block,
-                                        &selected_schema,
-                                        &mysql_channel,
-                                        &mongo_channel,
-                                        &rabbit_channel,
-                                    ) {
+
+                                    let schema_opt = schema.get("eth_block");
+                                    let prefix = format!("{}::{}", CHAIN, sub_event.target.value());
+                                    if let Err(err) = libs::callback::mysql(prefix.clone(), &block, schema_opt, &mysql_channel) {
+                                        println!("{}", err.to_string());
+                                    };
+                                    if let Err(err) = libs::callback::mongo(prefix.clone(), &block, "eth_block", &mongo_channel) {
+                                        println!("{}", err.to_string());
+                                    };
+                                    if let Err(err) = libs::callback::rabbit(prefix, &block, &rabbit_channel) {
                                         println!("{}", err.to_string());
                                     };
 
@@ -122,18 +122,18 @@ impl Plugin for EthereumPlugin {
                                 Ok(txs) => {
                                     for tx in txs {
                                         println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
-                                        let selected_schema = schema.get("eth_tx").unwrap();
-                                        let callback_prefix = format!("{}::{}", CHAIN, sub_event.target.value());
-                                        if let Err(err) = libs::subscribe::callback(
-                                            callback_prefix,
-                                            &tx,
-                                            selected_schema,
-                                            &mysql_channel,
-                                            &mongo_channel,
-                                            &rabbit_channel,
-                                        ) {
+
+                                        let schema_opt = schema.get("eth_tx");
+                                        let prefix = format!("{}::{}", CHAIN, sub_event.target.value());
+                                        if let Err(err) = libs::callback::mysql(prefix.clone(), &tx, schema_opt, &mysql_channel) {
                                             println!("{}", err.to_string());
-                                        }
+                                        };
+                                        if let Err(err) = libs::callback::mongo(prefix.clone(), &tx, "eth_tx", &mongo_channel) {
+                                            println!("{}", err.to_string());
+                                        };
+                                        if let Err(err) = libs::callback::rabbit(prefix, &tx, &rabbit_channel) {
+                                            println!("{}", err.to_string());
+                                        };
                                     }
 
                                     Self::sync_event(&rocks_channel, sub_event);
