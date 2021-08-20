@@ -98,7 +98,7 @@ impl Plugin for EthereumPlugin {
                             let block_result = Self::poll_block(sub_event);
                             match block_result {
                                 Ok(block) => {
-                                    println!("event_id={}, block={}", sub_event.event_id(), block.to_string());
+                                    // println!("event_id={}, block={}", sub_event.event_id(), block.to_string());
 
                                     let schema_opt = schema.get("eth_block");
                                     let prefix = format!("{}::{}", CHAIN, sub_event.target.value());
@@ -132,7 +132,7 @@ impl Plugin for EthereumPlugin {
                                             continue;
                                         }
 
-                                        println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
+                                        // println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
 
                                         let schema_opt = schema.get("eth_tx");
                                         let prefix = format!("{}::{}", CHAIN, sub_event.target.value());

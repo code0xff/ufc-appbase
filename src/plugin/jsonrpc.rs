@@ -51,7 +51,7 @@ impl Plugin for JsonRpcPlugin {
    }
 
    fn startup(&mut self) {
-      let host = app::value_of("jsonrpc::host").unwrap_or("127.0.0.1");
+      let host = app::value_of("jsonrpc::host").unwrap_or("0.0.0.0");
       let port = app::value_of_t::<u16>("jsonrpc::port").unwrap_or(8080);
       let io = self.io.take().unwrap();
       let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::from_str(&host).unwrap()), port);
