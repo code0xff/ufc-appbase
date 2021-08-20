@@ -100,7 +100,7 @@ impl Plugin for TendermintPlugin {
                         let block_header = Self::poll_block_header(sub_event);
                         match block_header {
                             Ok(header) => {
-                                println!("event_id={}, header={}", sub_event.event_id(), header.to_string());
+                                // println!("event_id={}, header={}", sub_event.event_id(), header.to_string());
 
                                 let schema_opt = schema.get("tm_block");
                                 let prefix = format!("{}::{}", CHAIN, sub_event.target.value());
@@ -144,7 +144,7 @@ impl Plugin for TendermintPlugin {
                                             continue;
                                         }
 
-                                        println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
+                                        // println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
 
                                         let schema_opt = schema.get("tm_tx");
                                         let prefix = format!("{}::{}", CHAIN, sub_event.target.value());
