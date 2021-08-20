@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::fs;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use appbase::*;
+use appbase::channel::Sender;
 use appbase::plugin::State;
 use futures::lock::Mutex as FutureMutex;
 use jsonrpc_core::Params;
@@ -13,12 +13,12 @@ use serde_json::{json, Map, Value};
 use crate::{enumeration, libs, message};
 use crate::error::error::ExpectedError;
 use crate::libs::mysql::get_params;
+use crate::libs::opts::opt_to_result;
 use crate::libs::request;
 use crate::libs::rocks::{get_by_prefix_static, get_static};
-use crate::libs::serde::{get_array, get_object, get_str, get_value_by_path, get_string, select_value};
+use crate::libs::serde::{get_array, get_object, get_str, get_string, get_value_by_path, select_value};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
-use crate::plugin::mongo::{MongoMsg, MongoPlugin};
-use crate::plugin::mysql::{MySqlMsg, MySqlPlugin};
+use crate::plugin::mysql::MySqlPlugin;
 use crate::plugin::rocks::{RocksMethod, RocksMsg, RocksPlugin};
 use crate::types::channel::MultiChannel;
 use crate::types::enumeration::Enumeration;
@@ -31,12 +31,6 @@ pub struct TendermintPlugin {
     channels: Option<MultiChannel>,
     monitor: Option<channel::Receiver>,
     schema: Option<HashMap<String, Schema>>,
-    tm_block_mysql_sync: Option<bool>,
-    tm_tx_mysql_sync: Option<bool>,
-    tm_block_mongo_sync: Option<bool>,
-    tm_tx_mongo_sync: Option<bool>,
-    tm_block_publish: Option<bool>,
-    tm_tx_publish: Option<bool>,
 }
 
 const CHAIN: &str = "tendermint";
@@ -62,12 +56,6 @@ impl Plugin for TendermintPlugin {
             channels: None,
             monitor: None,
             schema: None,
-            tm_block_mysql_sync: None,
-            tm_tx_mysql_sync: None,
-            tm_block_mongo_sync: None,
-            tm_tx_mongo_sync: None,
-            tm_block_publish: None,
-            tm_tx_publish: None,
         }
     }
 
@@ -82,17 +70,11 @@ impl Plugin for TendermintPlugin {
         let mut monitor = self.monitor.take().unwrap();
         let sub_events = Arc::clone(self.sub_events.as_ref().unwrap());
 
-        let rocks_channel = self.channels.as_ref().unwrap().get("rocks");
+        let mut rocks_channel = self.channels.as_ref().unwrap().get("rocks");
         let mysql_channel = self.channels.as_ref().unwrap().get("mysql");
         let rabbit_channel = self.channels.as_ref().unwrap().get("rabbit");
         let mongo_channel = self.channels.as_ref().unwrap().get("mongo");
 
-        let tm_block_mysql_sync = self.tm_block_mysql_sync.unwrap();
-        let tm_tx_mysql_sync = self.tm_tx_mysql_sync.unwrap();
-        let tm_block_mongo_sync = self.tm_block_mongo_sync.unwrap();
-        let tm_tx_mongo_sync = self.tm_tx_mongo_sync.unwrap();
-        let tm_block_publish = self.tm_block_publish.unwrap();
-        let tm_tx_publish = self.tm_tx_publish.unwrap();
         let app = app::quit_handle().unwrap();
 
         let schema = self.schema.as_ref().unwrap().clone();
@@ -107,189 +89,82 @@ impl Plugin for TendermintPlugin {
                 }
                 let mut sub_events_lock = sub_events_try_lock.unwrap();
                 if let Ok(msg) = monitor.try_recv() {
-                    let parsed_msg = msg.as_object().unwrap();
-                    let method = TendermintMethod::find(get_str(parsed_msg, "method").unwrap()).unwrap();
-                    let params = get_object(parsed_msg, "value").unwrap();
-                    match method {
-                        TendermintMethod::Subscribe => {
-                            let new_event = SubscribeEvent::new(CHAIN, &params);
-                            sub_events_lock.insert(new_event.task_id.clone(), new_event.clone());
-
-                            let task = SubscribeTask::from(&new_event, String::from(""));
-                            let msg = RocksMsg::new(RocksMethod::Put, new_event.task_id, Value::String(json!(task).to_string()));
-                            let _ = rocks_channel.send(msg);
-                        }
-                        TendermintMethod::Unsubscribe => {
-                            let task_id = get_string(&params, "task_id").unwrap();
-                            sub_events_lock.remove(&task_id);
-
-                            let msg = RocksMsg::new(RocksMethod::Delete, task_id, Value::Null);
-                            let _ = rocks_channel.send(msg);
-                        }
-                        TendermintMethod::Resubscribe => {
-                            let task_id = get_str(&params, "task_id").unwrap();
-                            let mut sub_event = sub_events_lock.get(task_id).unwrap().clone();
-                            sub_event.node_idx = 0;
-                            sub_event.status = SubscribeStatus::Working;
-                            sub_events_lock.insert(sub_event.task_id.clone(), sub_event.clone());
-
-                            let task = SubscribeTask::from(&sub_event, String::from(""));
-                            let msg = RocksMsg::new(RocksMethod::Put, sub_event.task_id, Value::String(json!(task).to_string()));
-                            let _ = rocks_channel.send(msg);
-                        }
-                        TendermintMethod::Stop => {
-                            let task_id = get_str(&params, "task_id").unwrap();
-                            let mut sub_event = sub_events_lock.get(task_id).unwrap().clone();
-                            sub_event.status = SubscribeStatus::Stopped;
-                            sub_events_lock.insert(sub_event.task_id.clone(), sub_event.clone());
-
-                            let task = SubscribeTask::from(&sub_event, String::from(""));
-                            let msg = RocksMsg::new(RocksMethod::Put, sub_event.task_id, Value::String(json!(task).to_string()));
-                            let _ = rocks_channel.send(msg);
-                        }
-                    };
+                    Self::message_handler(&msg, &mut sub_events_lock, &mut rocks_channel);
                 }
 
                 for (_, sub_event) in sub_events_lock.iter_mut() {
-                    if sub_event.is_workable() {
-                        match sub_event.target {
-                            SubscribeTarget::Block => {
-                                let node_index = usize::from(sub_event.node_idx);
-                                let req_url = format!("{}/blocks/{}", sub_event.nodes[node_index], sub_event.curr_height);
-                                let response = request::get(req_url.as_ref());
+                    if !sub_event.is_workable() {
+                        continue;
+                    }
+                    if sub_event.target == SubscribeTarget::Block {
+                        let block_header = Self::poll_block_header(sub_event);
+                        match block_header {
+                            Ok(header) => {
+                                println!("event_id={}, header={}", sub_event.event_id(), header.to_string());
 
-                                match response {
-                                    Ok(body) => {
-                                        let block_result = get_object(&body, "block");
-                                        let block = match block_result {
-                                            Ok(block) => block,
-                                            Err(err) => {
-                                                println!("{}", err);
-                                                continue;
-                                            }
-                                        };
-                                        let header = block.get("header").unwrap();
-                                        let header_object = header.as_object().unwrap();
+                                let schema_opt = schema.get("tm_block");
+                                let prefix = format!("{}::{}", CHAIN, sub_event.target.value());
+                                if let Err(err) = libs::callback::mysql(prefix.clone(), &header, schema_opt, &mysql_channel) {
+                                    println!("{}", err.to_string());
+                                };
+                                if let Err(err) = libs::callback::mongo(prefix.clone(), &header, "tm_block", &mongo_channel) {
+                                    println!("{}", err.to_string());
+                                };
+                                if let Err(err) = libs::callback::rabbit(prefix, &header, &rabbit_channel) {
+                                    println!("{}", err.to_string());
+                                };
 
-                                        let filtered_result = libs::serde::filter(header_object, sub_event.filter.clone());
+                                Self::sync_event(&rocks_channel, sub_event);
+                                sub_event.curr_height += 1;
+                            }
+                            Err(error) => Self::error_handler(&rocks_channel, sub_event, error)
+                        };
+                    } else {
+                        let block_txs_result = Self::poll_block_txs(sub_event);
+                        match block_txs_result {
+                            Ok(block_txs) => {
+                                if block_txs.len() > 0 {
+                                    let txs_result = Self::poll_txs(sub_event);
+                                    let txs = match txs_result {
+                                        Ok(txs) => txs,
+                                        Err(err) => {
+                                            sub_event.handle_error(&rocks_channel, err.to_string());
+                                            continue;
+                                        }
+                                    };
+
+                                    for tx in txs.iter() {
+                                        let tx_object = tx.as_object().unwrap();
+                                        let filtered_result = libs::serde::filter(tx_object, sub_event.filter.clone());
                                         if filtered_result.is_err() {
                                             let err = filtered_result.unwrap_err();
-                                            Self::error_handler(&rocks_channel, sub_event, err.to_string());
+                                            sub_event.handle_error(&rocks_channel, err.to_string());
                                             continue;
                                         } else if filtered_result.is_ok() && !filtered_result.unwrap() {
                                             continue;
                                         }
 
-                                        println!("event_id={}, header={}", sub_event.event_id(), header.to_string());
+                                        println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
 
-                                        if tm_block_mysql_sync {
-                                            if let Err(err) = Self::mysql_send(
-                                                &mysql_channel,
-                                                schema.get("tm_block").unwrap().clone(),
-                                                header.as_object().unwrap(),
-                                            ) {
-                                                println!("{}", err);
-                                            }
-                                        }
-                                        if tm_block_mongo_sync {
-                                            let mongo_msg = MongoMsg::new(String::from("tm_block"), header.clone());
-                                            let _ = mongo_channel.send(mongo_msg);
-                                        }
-                                        if tm_block_publish {
-                                            let _ = rabbit_channel.send(Value::String(header.to_string()));
-                                        }
-
-                                        Self::sync_event(&rocks_channel, sub_event);
-                                        sub_event.curr_height += 1;
-                                    }
-                                    Err(err) => {
-                                        if err.to_string().starts_with("requested block height") {
-                                            println!("waiting for next block...");
-                                        } else {
-                                            Self::error_handler(&rocks_channel, sub_event, err.to_string());
-                                        }
-                                    }
-                                }
-                            }
-                            SubscribeTarget::Tx => {
-                                let node_idx = usize::from(sub_event.node_idx);
-                                let latest_req_url = format!("{}/blocks/latest", sub_event.nodes[node_idx]);
-                                let response = request::get(latest_req_url.as_ref());
-                                match response {
-                                    Ok(body) => {
-                                        let height_result = get_value_by_path(&body, "block.header.height");
-                                        let latest_height = match height_result {
-                                            Ok(height) => u64::from_str(height.as_str().unwrap()).unwrap(),
-                                            Err(err) => {
-                                                Self::error_handler(&rocks_channel, sub_event, err.to_string());
-                                                continue;
-                                            }
+                                        let schema_opt = schema.get("tm_tx");
+                                        let prefix = format!("{}::{}", CHAIN, sub_event.target.value());
+                                        if let Err(err) = libs::callback::mysql(prefix.clone(), &tx, schema_opt, &mysql_channel) {
+                                            println!("{}", err.to_string());
                                         };
-                                        if sub_event.curr_height > latest_height {
-                                            println!("waiting for next block...");
-                                            continue;
-                                        }
-                                        let node_index = usize::from(sub_event.node_idx);
-                                        let req_url = format!("{}/cosmos/tx/v1beta1/txs?events=tx.height={}", sub_event.nodes[node_index], sub_event.curr_height);
-                                        let response = request::get(req_url.as_ref());
-                                        match response {
-                                            Ok(body) => {
-                                                let txs_result = get_array(&body, "tx_responses");
-                                                let txs = match txs_result {
-                                                    Ok(txs) => txs,
-                                                    Err(err) => {
-                                                        Self::error_handler(&rocks_channel, sub_event, err.to_string());
-                                                        continue;
-                                                    }
-                                                };
-                                                for tx in txs.iter() {
-                                                    let tx_object = tx.as_object().unwrap();
-                                                    let filtered_result = libs::serde::filter(tx_object, sub_event.filter.clone());
-                                                    if filtered_result.is_err() {
-                                                        let err = filtered_result.unwrap_err();
-                                                        Self::error_handler(&rocks_channel, sub_event, err.to_string());
-                                                        continue;
-                                                    } else if filtered_result.is_ok() && !filtered_result.unwrap() {
-                                                        continue;
-                                                    }
-
-                                                    println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
-
-                                                    if tm_tx_mysql_sync {
-                                                        if let Err(err) = Self::mysql_send(
-                                                            &mysql_channel,
-                                                            schema.get("tm_tx").unwrap().clone(),
-                                                            tx_object,
-                                                        ) {
-                                                            println!("{}", err);
-                                                        }
-                                                    }
-                                                    if tm_tx_mongo_sync {
-                                                        let mongo_msg = MongoMsg::new(String::from("tm_tx"), tx.clone());
-                                                        if let Err(err) = mongo_channel.send(mongo_msg) {
-                                                            println!("{}", err);
-                                                        }
-                                                    }
-                                                    if tm_tx_publish {
-                                                        if let Err(err) = rabbit_channel.send(Value::String(tx.to_string())) {
-                                                            println!("{}", err);
-                                                        }
-                                                    }
-                                                }
-
-                                                Self::sync_event(&rocks_channel, sub_event);
-                                                sub_event.curr_height += 1;
-                                            }
-                                            Err(err) => {
-                                                Self::error_handler(&rocks_channel, sub_event, err.to_string());
-                                            }
-                                        }
+                                        if let Err(err) = libs::callback::mongo(prefix.clone(), &tx, "tm_tx", &mongo_channel) {
+                                            println!("{}", err.to_string());
+                                        };
+                                        if let Err(err) = libs::callback::rabbit(prefix, &tx, &rabbit_channel) {
+                                            println!("{}", err.to_string());
+                                        };
                                     }
-                                    Err(err) => {
-                                        Self::error_handler(&rocks_channel, sub_event, err.to_string());
-                                    }
+                                } else {
+                                    println!("block txs is empty! curr_height={}", sub_event.curr_height);
                                 }
+                                Self::sync_event(&rocks_channel, sub_event);
+                                sub_event.curr_height += 1;
                             }
+                            Err(error) => Self::error_handler(&rocks_channel, sub_event, error)
                         }
                     }
                 }
@@ -307,12 +182,6 @@ impl TendermintPlugin {
         self.channels = Some(channels.to_owned());
         self.monitor = Some(app::subscribe_channel(String::from("tendermint")));
         self.schema = Some(HashMap::new());
-        self.tm_block_mysql_sync = Some(libs::opts::bool("tendermint::block-mysql-sync").unwrap());
-        self.tm_tx_mysql_sync = Some(libs::opts::bool("tendermint::tx-mysql-sync").unwrap());
-        self.tm_block_mongo_sync = Some(libs::opts::bool("tendermint::block-mongo-sync").unwrap());
-        self.tm_tx_mongo_sync = Some(libs::opts::bool("tendermint::tx-mongo-sync").unwrap());
-        self.tm_block_publish = Some(libs::opts::bool("tendermint::block-rabbit-mq-publish").unwrap());
-        self.tm_tx_publish = Some(libs::opts::bool("tendermint::tx-rabbit-mq-publish").unwrap());
     }
 
     fn init_mysql(&mut self) {
@@ -321,7 +190,7 @@ impl TendermintPlugin {
                 return;
             }
         }
-        let json_str = fs::read_to_string("schema/mysql.json").unwrap();
+        let json_str = fs::read_to_string("schema/tm_mysql.json").unwrap();
         let json_schema: Value = serde_json::from_str(json_str.as_str()).unwrap();
         let schema_map = json_schema.as_object().unwrap();
 
@@ -521,13 +390,12 @@ impl TendermintPlugin {
         let rocks_db = rocks.get_db();
         let raw_tasks = get_by_prefix_static(&rocks_db, TASK_PREFIX);
         let sub_events = Arc::clone(self.sub_events.as_ref().unwrap());
-        raw_tasks.as_array().unwrap().iter()
-            .for_each(|raw_task| {
-                let task = raw_task.as_object().unwrap();
-                let event = SubscribeEvent::from(task);
-                let mut sub_events_lock = sub_events.try_lock().unwrap();
-                sub_events_lock.insert(event.task_id.clone(), event);
-            });
+        let mut sub_events_lock = sub_events.try_lock().unwrap();
+        for raw_task in raw_tasks.as_array().unwrap() {
+            let task = raw_task.as_object().unwrap();
+            let event = SubscribeEvent::from(task);
+            sub_events_lock.insert(event.task_id.clone(), event);
+        }
     }
 
     fn sync_event(rocks_channel: &channel::Sender, sub_event: &mut SubscribeEvent) {
@@ -538,20 +406,113 @@ impl TendermintPlugin {
         let _ = rocks_channel.send(msg);
     }
 
-    fn error_handler(rocks_channel: &channel::Sender, sub_event: &mut SubscribeEvent, err_msg: String) {
-        sub_event.handle_err(err_msg.clone());
-        let task = SubscribeTask::from(sub_event, err_msg);
-
-        let msg = RocksMsg::new(RocksMethod::Put, sub_event.task_id.clone(), Value::String(json!(task).to_string()));
-        let _ = rocks_channel.send(msg);
+    fn error_handler(rocks_channel: &channel::Sender, sub_event: &mut SubscribeEvent, error: ExpectedError) {
+        match error {
+            ExpectedError::BlockHeightError(err_msg) => println!("{}", err_msg),
+            ExpectedError::FilterError(err_msg) => {
+                println!("{}", err_msg);
+                Self::sync_event(&rocks_channel, sub_event);
+                sub_event.curr_height += 1;
+            }
+            _ => {
+                sub_event.handle_error(&rocks_channel, error.to_string());
+            }
+        };
     }
 
-    fn mysql_send(mysql_channel: &channel::Sender, schema: Schema, values: &Map<String, Value>) -> Result<(), ExpectedError> {
-        let insert_query = schema.insert_query;
-        let names: Vec<&str> = schema.attributes.iter().map(|attribute| { attribute.name.as_str() }).collect();
-        let picked_value = select_value(values, names)?;
-        let mysql_msg = MySqlMsg::new(String::from(insert_query), Value::Object(picked_value));
-        let _ = mysql_channel.send(mysql_msg)?;
-        Ok(())
+    fn message_handler(msg: &Value, sub_events: &mut HashMap<String, SubscribeEvent>, rocks_channel: &mut Sender) {
+        let parsed_msg = msg.as_object().unwrap();
+        let method = TendermintMethod::find(get_str(parsed_msg, "method").unwrap()).unwrap();
+        let params = get_object(parsed_msg, "value").unwrap();
+        match method {
+            TendermintMethod::Subscribe => {
+                let new_event = SubscribeEvent::new(CHAIN, &params);
+                sub_events.insert(new_event.task_id.clone(), new_event.clone());
+
+                let task = SubscribeTask::from(&new_event, String::from(""));
+                let msg = RocksMsg::new(RocksMethod::Put, new_event.task_id, Value::String(json!(task).to_string()));
+                let _ = rocks_channel.send(msg);
+            }
+            TendermintMethod::Unsubscribe => {
+                let task_id = get_string(&params, "task_id").unwrap();
+                sub_events.remove(&task_id);
+
+                let msg = RocksMsg::new(RocksMethod::Delete, task_id, Value::Null);
+                let _ = rocks_channel.send(msg);
+            }
+            TendermintMethod::Resubscribe => {
+                let task_id = get_str(&params, "task_id").unwrap();
+                let mut sub_event = sub_events.get(task_id).unwrap().clone();
+                sub_event.node_idx = 0;
+                sub_event.status = SubscribeStatus::Working;
+                sub_events.insert(sub_event.task_id.clone(), sub_event.clone());
+
+                let task = SubscribeTask::from(&sub_event, String::from(""));
+                let msg = RocksMsg::new(RocksMethod::Put, sub_event.task_id, Value::String(json!(task).to_string()));
+                let _ = rocks_channel.send(msg);
+            }
+            TendermintMethod::Stop => {
+                let task_id = get_str(&params, "task_id").unwrap();
+                let mut sub_event = sub_events.get(task_id).unwrap().clone();
+                sub_event.status = SubscribeStatus::Stopped;
+                sub_events.insert(sub_event.task_id.clone(), sub_event.clone());
+
+                let task = SubscribeTask::from(&sub_event, String::from(""));
+                let msg = RocksMsg::new(RocksMethod::Put, sub_event.task_id, Value::String(json!(task).to_string()));
+                let _ = rocks_channel.send(msg);
+            }
+        };
+    }
+
+    fn poll_block(sub_event: &mut SubscribeEvent) -> Result<Value, ExpectedError> {
+        let node_index = usize::from(sub_event.node_idx);
+        let req_url = format!("{}/blocks/{}", sub_event.nodes[node_index], sub_event.curr_height);
+        let response = request::get(req_url.as_str());
+        let body = match response {
+            Ok(body) => body,
+            Err(err) => {
+                return if err.to_string().starts_with("requested block height") {
+                    Err(ExpectedError::BlockHeightError(err.to_string()))
+                } else {
+                    Err(err)
+                };
+            }
+        };
+        let block = opt_to_result(body.get("block"))?;
+        Ok(block.clone())
+    }
+
+    fn poll_block_header(sub_event: &mut SubscribeEvent) -> Result<Value, ExpectedError> {
+        let block_value = Self::poll_block(sub_event)?;
+        let block = opt_to_result(block_value.as_object())?;
+        let header = opt_to_result(block.get("header"))?;
+        let header_object = opt_to_result(header.as_object())?;
+
+        let filter_result = libs::serde::filter(header_object, sub_event.filter.clone())?;
+        if !filter_result {
+            return Err(ExpectedError::FilterError(String::from("value does not match on filter condition!")));
+        }
+        Ok(header.clone())
+    }
+
+    fn poll_block_txs(sub_event: &mut SubscribeEvent) -> Result<Vec<Value>, ExpectedError> {
+        let block_value = Self::poll_block(sub_event)?;
+        let block = opt_to_result(block_value.as_object())?;
+        let txs_value = get_value_by_path(block, "data.txs")?;
+        if !txs_value.is_array() {
+            return Err(ExpectedError::TypeError(String::from("txs in block data is not array!")));
+        }
+        let txs = opt_to_result(txs_value.as_array())?;
+
+        Ok(txs.clone())
+    }
+
+    fn poll_txs(sub_event: &mut SubscribeEvent) -> Result<Vec<Value>, ExpectedError> {
+        let node_index = usize::from(sub_event.node_idx);
+        let req_url = format!("{}/cosmos/tx/v1beta1/txs?events=tx.height={}", sub_event.nodes[node_index], sub_event.curr_height);
+        let body = request::get(req_url.as_str())?;
+
+        let txs_result = get_array(&body, "tx_responses")?;
+        Ok(txs_result.clone())
     }
 }

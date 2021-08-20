@@ -1,5 +1,6 @@
 use std::env::VarError;
 use std::fmt::{Display, Formatter};
+use std::num::ParseIntError;
 use std::str::ParseBoolError;
 
 use lettre::transport::smtp;
@@ -13,6 +14,8 @@ pub enum ExpectedError {
     RequestError(String),
     ParsingError(String),
     ChannelError(String),
+    FilterError(String),
+    BlockHeightError(String),
 }
 
 impl From<smtp::Error> for ExpectedError {
@@ -54,6 +57,12 @@ impl<T> From<tokio::sync::broadcast::error::SendError<T>> for ExpectedError {
     }
 }
 
+impl From<ParseIntError> for ExpectedError {
+    fn from(err: ParseIntError) -> Self {
+        ExpectedError::ParsingError(err.to_string())
+    }
+}
+
 impl Display for ExpectedError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -64,6 +73,8 @@ impl Display for ExpectedError {
             ExpectedError::RequestError(err) => write!(f, "{}", err),
             ExpectedError::ParsingError(err) => write!(f, "{}", err),
             ExpectedError::ChannelError(err) => write!(f, "{}", err),
+            ExpectedError::FilterError(err) => write!(f, "{}", err),
+            ExpectedError::BlockHeightError(err) => write!(f, "{}", err),
         }
     }
 }

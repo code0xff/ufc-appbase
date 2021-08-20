@@ -1,0 +1,188 @@
+{
+  "tm_block": {
+    "attributes": {
+      "chain_id": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
+      },
+      "height": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "time": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
+      },
+      "last_commit_hash": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
+      },
+      "data_hash": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
+      },
+      "validators_hash": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
+      },
+      "next_validators_hash": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
+      },
+      "consensus_hash": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
+      },
+      "app_hash": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
+      },
+      "last_results_hash": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
+      },
+      "evidence_hash": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
+      },
+      "proposer_address": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
+      }
+    },
+    "indexes": [
+      [
+        "height"
+      ]
+    ],
+    "uniques": [
+      [
+        "height"
+      ]
+    ]
+  },
+  "tm_tx": {
+    "attributes": {
+      "txhash": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "height": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "gas_wanted": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "gas_used": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "fee": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 65536
+      },
+      "from_address": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
+      },
+      "to_address": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
+      },
+      "delegator_address": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
+      },
+      "validator_address": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
+      },
+      "raw_log": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 65536
+      },
+      "timestamp": {
+        "type": "string",
+        "maxLength": 100
+      }
+    },
+    "indexes": [
+      [
+        "txhash"
+      ],
+      [
+        "height"
+      ],
+      [
+        "from_address"
+      ],
+      [
+        "to_address"
+      ],
+      [
+        "delegator_address"
+      ],
+      [
+        "validator_address"
+      ]
+    ],
+    "uniques": [
+      [
+        "txhash"
+      ]
+    ]
+  }
+}
