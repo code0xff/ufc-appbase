@@ -39,8 +39,8 @@ pub fn rabbit(prefix: String, value: &Value, rabbit: &Sender) -> Result<(), Expe
 fn mysql_send(mysql_channel: &channel::Sender, schema: &Schema, values: &Map<String, Value>) -> Result<(), ExpectedError> {
     let insert_query = schema.insert_query.clone();
     let names: Vec<&str> = schema.attributes.iter().map(|attribute| { attribute.name.as_str() }).collect();
-    let picked_value = select_value(values, names)?;
-    let mysql_msg = MySqlMsg::new(insert_query, Value::Object(picked_value));
+    let selected_value = select_value(values, names)?;
+    let mysql_msg = MySqlMsg::new(insert_query, Value::Object(selected_value));
     let _ = mysql_channel.send(mysql_msg)?;
     Ok(())
 }
