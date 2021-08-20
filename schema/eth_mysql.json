@@ -91,35 +91,59 @@
   "eth_tx": {
     "attributes": {
       "blockHash": {
-        "type": "string",
+        "type": [
+          "string",
+          "null"
+        ],
         "maxLength": 100
       },
       "blockNumber": {
-        "type": "string",
+        "type": [
+          "string",
+          "null"
+        ],
         "maxLength": 100
       },
       "chainId": {
-        "type": "string",
+        "type": [
+          "string",
+          "null"
+        ],
         "maxLength": 100
       },
       "from": {
-        "type": "string",
+        "type": [
+          "string",
+          "null"
+        ],
         "maxLength": 100
       },
       "to": {
-        "type": "string",
+        "type": [
+          "string",
+          "null"
+        ],
         "maxLength": 100
       },
       "gas": {
-        "type": "string",
+        "type": [
+          "string",
+          "null"
+        ],
         "maxLength": 100
       },
       "gasPrice": {
-        "type": "string",
+        "type": [
+          "string",
+          "null"
+        ],
         "maxLength": 100
       },
       "hash": {
-        "type": "string",
+        "type": [
+          "string",
+          "null"
+        ],
         "maxLength": 100
       },
       "input": {
@@ -130,23 +154,38 @@
         "maxLength": 65536
       },
       "maxFeePerGas": {
-        "type": "string",
-        "maxLength": 65536
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 100
       },
       "maxPriorityFeePerGas": {
-        "type": "string",
+        "type": [
+          "string",
+          "null"
+        ],
         "maxLength": 100
       },
       "nonce": {
-        "type": "string",
+        "type": [
+          "string",
+          "null"
+        ],
         "maxLength": 100
       },
       "transactionIndex": {
-        "type": "string",
+        "type": [
+          "string",
+          "null"
+        ],
         "maxLength": 100
       },
       "value": {
-        "type": "string",
+        "type": [
+          "string",
+          "null"
+        ],
         "maxLength": 100
       }
     },

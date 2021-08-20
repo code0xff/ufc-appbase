@@ -86,13 +86,10 @@ impl Schema {
         query_line.push(format!("`{}_id` bigint(20) not null auto_increment", table));
         for attribute in attributes.iter() {
             let converted_type = convert_type(attribute._type.clone(), attribute.max_length).unwrap();
-            match attribute.max_length {
-                None => {
-                    query_line.push(format!("`{}` {} {}", attribute.name, converted_type, Self::null_or_not(attribute.nullable)));
-                }
-                Some(size) => {
-                    query_line.push(format!("`{}` {}({}) {}", attribute.name, converted_type, size, Self::null_or_not(attribute.nullable)));
-                }
+            if attribute.max_length.is_none() || converted_type == "text" {
+                query_line.push(format!("`{}` {} {}", attribute.name, converted_type, Self::null_or_not(attribute.nullable)));
+            } else {
+                query_line.push(format!("`{}` {}({}) {}", attribute.name, converted_type, attribute.max_length.unwrap(), Self::null_or_not(attribute.nullable)));
             }
         }
         query_line.push(format!("PRIMARY KEY (`{}_id`)", table));
@@ -119,7 +116,7 @@ impl Schema {
     fn insert_query(table: String, attributes: &Vec<Attribute>) -> String {
         let columns: Vec<String> = attributes.iter().map(|attribute| { attribute.clone().name.clone() }).collect();
         let column_names = columns.iter().map(|v| { format!("`{}`", v) }).collect::<Vec<String>>().join(", ");
-        let values = columns.iter().map(|v| { format!(":{}", v) }).collect::<Vec<String>>().join(", ");
+        let values = columns.iter().map(|_| { String::from("?") }).collect::<Vec<String>>().join(", ");
         format!("insert into {} ({}) values ({})", table, column_names, values)
     }
 
