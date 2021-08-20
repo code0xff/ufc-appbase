@@ -122,6 +122,16 @@ impl Plugin for EthereumPlugin {
                             match txs_result {
                                 Ok(txs) => {
                                     for tx in txs {
+                                        let tx_object = tx.as_object().unwrap();
+                                        let filtered_result = libs::serde::filter(tx_object, sub_event.filter.clone());
+                                        if filtered_result.is_err() {
+                                            let err = filtered_result.unwrap_err();
+                                            sub_event.handle_error(&rocks_channel, err.to_string());
+                                            continue;
+                                        } else if filtered_result.is_ok() && !filtered_result.unwrap() {
+                                            continue;
+                                        }
+
                                         println!("event_id={}, tx={}", sub_event.event_id(), tx.to_string());
 
                                         let schema_opt = schema.get("eth_tx");
