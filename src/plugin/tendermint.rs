@@ -226,8 +226,8 @@ impl TendermintPlugin {
             }
             let order = get_str(&params, "order").unwrap();
             let query = format!("select * from tm_block where height >= :from_height and height <= :to_height order by 1 {}", order);
-            let picked_params = select_value(&params, vec!["from_height", "to_height"]).unwrap();
-            let result = MySqlPlugin::query_static(&pool, query, get_params(&picked_params)).unwrap();
+            let selected_params = select_value(&params, vec!["from_height", "to_height"]).unwrap();
+            let result = MySqlPlugin::query_static(&pool, query, get_params(&selected_params)).unwrap();
             Box::new(futures::future::ok(Value::Array(result)))
         });
 
@@ -240,17 +240,17 @@ impl TendermintPlugin {
                 error.insert(String::from("error"), Value::String(verified.unwrap_err().to_string()));
                 return Box::new(futures::future::ok(Value::Object(error)));
             }
-            let (query, picked_params) = if params.get("txhash").is_some() {
+            let (query, selected_params) = if params.get("txhash").is_some() {
                 let query = String::from("select * from tm_tx where txhash=:txhash");
-                let picked_params = select_value(&params, vec!["txhash"]).unwrap();
-                (query, picked_params)
+                let selected_params = select_value(&params, vec!["txhash"]).unwrap();
+                (query, selected_params)
             } else {
                 let order = get_str(&params, "order").unwrap();
                 let query = format!("select * from tm_tx where height >= :from_height and height <= :to_height order by 1 {}", order);
-                let picked_params = select_value(&params, vec!["from_height", "to_height"]).unwrap();
-                (query, picked_params)
+                let selected_params = select_value(&params, vec!["from_height", "to_height"]).unwrap();
+                (query, selected_params)
             };
-            let result = MySqlPlugin::query_static(&pool, query, get_params(&picked_params)).unwrap();
+            let result = MySqlPlugin::query_static(&pool, query, get_params(&selected_params)).unwrap();
             Box::new(futures::future::ok(Value::Array(result)))
         });
     }

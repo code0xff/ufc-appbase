@@ -6,7 +6,7 @@ use crate::types::enumeration::Enumeration;
 use crate::types::mysql::Order;
 use crate::validation::verify::verify_default;
 
-const HEIGHT_RANGE: u64 = 50;
+const HEIGHT_RANGE: u64 = 10;
 
 pub fn verify(params: &Map<String, Value>) -> Result<(), ExpectedError> {
     if params.get("txhash").is_some() {

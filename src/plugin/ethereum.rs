@@ -12,10 +12,11 @@ use serde_json::{json, Map, Value};
 
 use crate::{enumeration, libs, message};
 use crate::error::error::ExpectedError;
+use crate::libs::mysql::get_params;
 use crate::libs::opts::opt_to_result;
 use crate::libs::request;
 use crate::libs::rocks::{get_by_prefix_static, get_static};
-use crate::libs::serde::{get_array, get_object, get_str, get_string};
+use crate::libs::serde::{get_array, get_object, get_str, get_string, select_value};
 use crate::plugin::jsonrpc::JsonRpcPlugin;
 use crate::plugin::mysql::MySqlPlugin;
 use crate::plugin::rocks::{RocksMethod, RocksMsg, RocksPlugin};
@@ -23,7 +24,7 @@ use crate::types::channel::MultiChannel;
 use crate::types::enumeration::Enumeration;
 use crate::types::mysql::Schema;
 use crate::types::subscribe::{SubscribeEvent, SubscribeStatus, SubscribeTarget, SubscribeTask};
-use crate::validation::{get_task, resubscribe, stop_subscribe, subscribe, unsubscribe};
+use crate::validation::{get_blocks, get_task, get_txs, resubscribe, stop_subscribe, subscribe, unsubscribe};
 
 pub struct EthereumPlugin {
     sub_events: Option<SubscribeEvents>,
@@ -422,6 +423,53 @@ impl EthereumPlugin {
                 println!("error={}", err.to_string());
             }
         }
+
+        let plugin_handle = app::get_plugin::<JsonRpcPlugin>();
+        let mut plugin = plugin_handle.lock().unwrap();
+        let jsonrpc = plugin.downcast_mut::<JsonRpcPlugin>().unwrap();
+
+        let pool = mysql.get_pool();
+        jsonrpc.add_method(String::from("eth_mysql_get_blocks"), move |params: Params| {
+            let params: Map<String, Value> = params.parse().unwrap();
+            let verified = get_blocks::verify(&params);
+            if verified.is_err() {
+                let mut error = Map::new();
+                error.insert(String::from("error"), Value::String(verified.unwrap_err().to_string()));
+                return Box::new(futures::future::ok(Value::Object(error)));
+            }
+            let order = get_str(&params, "order").unwrap();
+            let query = format!("select * from eth_block where number >= :from_height and number <= :to_height order by 1 {}", order);
+            let selected_params = select_value(&params, vec!["from_height", "to_height"]).unwrap();
+            let converted_params = selected_params.iter().map(|(k, v)| { (k.clone(), Value::String(format!("0x{:x}", v.as_u64().unwrap()))) }).collect();
+
+            let result = MySqlPlugin::query_static(&pool, query, get_params(&converted_params)).unwrap();
+            Box::new(futures::future::ok(Value::Array(result)))
+        });
+
+        let pool = mysql.get_pool();
+        jsonrpc.add_method(String::from("eth_mysql_get_txs"), move |params: Params| {
+            let params: Map<String, Value> = params.parse().unwrap();
+            let verified = get_txs::verify(&params);
+            if verified.is_err() {
+                let mut error = Map::new();
+                error.insert(String::from("error"), Value::String(verified.unwrap_err().to_string()));
+                return Box::new(futures::future::ok(Value::Object(error)));
+            }
+            let (query, selected_params) = if params.get("txhash").is_some() {
+                let query = String::from("select * from eth_tx where hash=:txhash");
+                let selected_params = select_value(&params, vec!["txhash"]).unwrap();
+                (query, selected_params)
+            } else {
+                let order = get_str(&params, "order").unwrap();
+                let query = format!("select * from eth_tx where blockNumber >= :from_height and blockNumber <= :to_height order by 1 {}", order);
+                let selected_params = select_value(&params, vec!["from_height", "to_height"]).unwrap();
+                let converted_params = selected_params.iter().map(|(k, v)| { (k.clone(), Value::String(format!("0x{:x}", v.as_u64().unwrap()))) }).collect();
+
+                (query, converted_params)
+            };
+            let result = MySqlPlugin::query_static(&pool, query, get_params(&selected_params)).unwrap();
+            Box::new(futures::future::ok(Value::Array(result)))
+        });
     }
 }
 
