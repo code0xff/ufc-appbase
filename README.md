@@ -124,8 +124,8 @@ block-rabbit-mq-publish=true # publish cosmos block message
 tx-rabbit-mq-publish=true # publish cosmos tx message
 
 [ethereum]
-block-mongo-sync=true # publish cosmos block message
-tx-mongo-sync=true # publish cosmos tx message
+block-rabbit-mq-publish=true # publish cosmos block message
+tx-rabbit-mq-publish=true # publish cosmos tx message
 
 [app]
 plugin=["RabbitPlugin"]
@@ -139,7 +139,7 @@ cargo run --package ufc-appbase --bin ufc-appbase -- --config-dir . --plugin Rab
 3. request to subscribe block or tx
 
 ### Send Email through Gmail
-1. [set up your account to send email]((https://support.google.com/mail/answer/7126229?hl=en))
+1. [set up your account to send email](https://support.google.com/mail/answer/7126229?hl=en)
 
 2. add sending email code
 ```rust
