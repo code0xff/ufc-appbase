@@ -15,8 +15,8 @@ UFC is open source framework for supporting blockchain service. You can easily c
 - MySQL
 - MongoDB
 - Email (SMTP)
-- Slack (Incoming Webhooks)
-- Telegram (Telegram Bot)
+- [Slack (Incoming Webhooks)](https://api.slack.com/messaging/webhooks)
+- [Telegram (Telegram Bot)](https://core.telegram.org/bots)
 
 ### Chain Plugin
 - Tendermint (for Cosmos SDK based Blockchain)
@@ -34,10 +34,27 @@ UFC has Tendermint and Ethereum Plugin, so if you want to monitor or archive blo
 
 ### Run UFC
 ```shell
-
+cargo run --package ufc-appbase --bin ufc-appbase -- --config-dir .
 ```
 
-### Save on MySQL DB
+### Request example to subscribe using JSON-RPC
+```shell
+curl --location --request POST 'localhost:8080' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tm_subscribe",
+    "params": { 
+        "target": "block",
+        "sub_id": "cosmoshub-4",
+        "start_height": 7364551,
+        "nodes": ["https://cosmoshub-4--lcd--full.datahub.figment.io/apikey/..."]
+    }
+}'
+```
+
+### Save to MySQL DB
 1. download MariaDB docker image and run docker image
 ```shell
 docker pull mariadb
@@ -59,12 +76,13 @@ plugin=["MySqlPlugin"]
 ```
 or
 ```shell
-
+# add to save cosmos block to mysql db
+cargo run --package ufc-appbase --bin ufc-appbase -- --config-dir . --plugin MySqlPlugin --tm-block-mysql-sync  
 ```
 
 3. request to subscribe block or tx
 
-### Save on MongoDB
+### Save to MongoDB
 1. download MongoDB docker image and run docker image
 ```shell
 docker pull mongo
@@ -86,7 +104,8 @@ plugin=["MongoPlugin"]
 ```
 or
 ```shell
-
+# add to save cosmos block to mongo db
+cargo run --package ufc-appbase --bin ufc-appbase -- --config-dir . --plugin MongoPlugin --tm-block-mongo-sync 
 ```
 
 3. request to subscribe block or tx
@@ -113,8 +132,11 @@ plugin=["RabbitPlugin"]
 ```
 or
 ```shell
-
+# add to publish cosmos block message
+cargo run --package ufc-appbase --bin ufc-appbase -- --config-dir . --plugin RabbitPlugin --tm-block-rabbit-mq-publish 
 ```
+
+3. request to subscribe block or tx
 
 ### Send Email through Gmail
 1. [set up your account to send email]((https://support.google.com/mail/answer/7126229?hl=en))
@@ -122,7 +144,8 @@ or
 2. add sending email code
 ```rust
 // code example
-
+let email_msg = EmailMsg::new(String::from("to_address@domain.dev"), String::from("Test Subject"), String::from("Email Contents"));
+let _ = email_channel.send(email_msg);
 ```
 
 3. edit config.toml or add flag on UFC running command
@@ -139,18 +162,23 @@ plugin=["EmailPlugin"]
 ```
 or
 ```shell
-
+cargo run --package ufc-appbase --bin ufc-appbase -- --config-dir . --plugin EmailPlugin --smtp-username [username] --smtp-password [password]
 ```
 
 ### Send Slack
 1. create workspace and add channel
+- [Create Workspace Guide](https://slack.com/intl/en-kr/help/articles/206845317-Create-a-Slack-workspace)
+- [Create Channel Guide](https://slack.com/intl/en-kr/help/articles/201402297-Create-a-channel)
 
 2. add slack app and activate incoming webhooks
+- [Setup App Guide](https://api.slack.com/authentication/basics)
+- [Setup Incoming Hooks Guide](https://api.slack.com/messaging/webhooks)
 
 3. add sending slack code
 ```rust
 // code example
-
+let slack_msg = SlackMsg::new(String::from("https://hooks.slack.com/services/slack_hook_address"), String::from("Slack Test Message"));
+let _ = slack_channel.send(slack_msg);
 ```
 
 4. edit config.toml or add flag on UFC running command
@@ -160,7 +188,7 @@ plugin=["SlackPlugin"]
 ```
 or
 ```shell
-
+cargo run --package ufc-appbase --bin ufc-appbase -- --config-dir . --plugin SlackPlugin
 ```
 
 ### Send Telegram
@@ -169,7 +197,8 @@ or
 2. add sending telegram
 ```rust
 // code example
-
+let telegram_msg = TelegramMsg::new(String::from("chat_id"), String::from("Test Text"));
+let _ = telegram_channel.send(telegram_msg);
 ```
 
 3. edit config.toml or add flag on UFC running command
@@ -182,12 +211,7 @@ plugin=["TelegramPlugin"]
 ```
 or
 ```shell
-
-```
-
-### Request to start to subscribe block (JSON-RPC request example)
-```shell
-
+cargo run --package ufc-appbase --bin ufc-appbase -- --config-dir . --plugin TelegramPlugin --telegram-bot-token [TELEGRAM_BOT_TOKEN]
 ```
 
 ## Add New Plugin
