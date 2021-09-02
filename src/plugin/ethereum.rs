@@ -13,7 +13,7 @@ use serde_json::{json, Map, Value};
 use crate::{enumeration, libs, message};
 use crate::error::error::ExpectedError;
 use crate::libs::mysql::get_params;
-use crate::libs::opts::opt_to_result;
+use crate::libs::opts::{opt_to_result, opt_ref_to_result};
 use crate::libs::request;
 use crate::libs::rocks::{get_by_prefix_static, get_static};
 use crate::libs::serde::{get_array, get_object, get_str, get_string, select_value};
@@ -395,9 +395,13 @@ impl EthereumPlugin {
         let block = opt_to_result(body.get("result"))?;
         if block.is_null() {
             return Err(ExpectedError::BlockHeightError(String::from("block has not yet been created!")));
-        } else {
-            Ok(block.clone())
         }
+        let block_object = opt_ref_to_result(block.as_object())?;
+        let filter_result = libs::serde::filter(block_object, sub_event.filter.clone())?;
+        if !filter_result {
+            return Err(ExpectedError::FilterError(String::from("value does not match on filter condition!")));
+        }
+        Ok(block.clone())
     }
 
     fn poll_txs(sub_event: &mut SubscribeEvent) -> Result<Vec<Value>, ExpectedError> {
