@@ -87,7 +87,7 @@ dependencies = [
 [[package]]
 name = "appbase"
 version = "0.1.0"
-source = "git+https://github.com/turnpike/appbase-rs#0a924752f507ffd84b1a5ea8d5bd14fceb2fa86d"
+source = "git+https://github.com/turnpike/appbase-rs?rev=0a92475#0a924752f507ffd84b1a5ea8d5bd14fceb2fa86d"
 dependencies = [
  "clap",
  "directories",
